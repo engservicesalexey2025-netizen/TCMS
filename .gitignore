@@ -1,0 +1,37 @@
+## Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.db
+
+## Node / frontend
+node_modules/
+frontend/dist/
+.vite/
+
+## Env
+.env
+.env.*
+!.env.example
+
+## Docker
+*.log
+
+## Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+## Uploaded files (local dev) — FILE_STORAGE_PATH resolves relative to the
+## backend process's cwd, which is the repo root under our launch.json setup.
+/storage/
+backend/storage/
+
+## Portable local PostgreSQL (dev convenience, not part of the project)
+.pgportable/
+
+## Claude Code session-local runtime state (not shared project config)
+.claude/*.lock
