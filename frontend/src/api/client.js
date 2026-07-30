@@ -22,10 +22,13 @@ apiClient.interceptors.response.use(
       const { useAuthStore } = await import("../stores/auth");
       useAuthStore().logout();
     }
-    if (error.response?.status === 403) {
-      const { default: router } = await import("../router");
-      router.push({ name: "forbidden" });
-    }
+    // 403 намеренно НЕ перекидывает на страницу «Недостаточно прав» глобально:
+    // доступ к самим страницам уже проверяется в router.beforeEach через
+    // auth.can(), а 403 от фонового/второстепенного запроса на разрешённой
+    // странице (например, один из нескольких счётчиков на Дашборде, если у
+    // роли нет прав на часть из них) не должен выкидывать пользователя со
+    // страницы, куда ему разрешено заходить. Компонент, сделавший запрос,
+    // сам решает, как обработать отказ.
     return Promise.reject(error);
   },
 );

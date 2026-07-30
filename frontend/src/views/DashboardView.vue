@@ -1,21 +1,38 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import apiClient from "../api/client";
+import { useAuthStore } from "../stores/auth";
 
-const counts = ref({ Employees: 0, Projects: 0, Remarks: 0 });
+const auth = useAuthStore();
+
+const cards = [
+  { key: "Employees", label: "Сотрудники", resource: "/employees", module: "EMPLOYEES" },
+  { key: "Projects", label: "Проекты", resource: "/projects", module: "PROJECTS" },
+  { key: "Remarks", label: "Замечания", resource: "/remarks", module: "REMARKS" },
+];
+
+const counts = ref({ Employees: null, Projects: null, Remarks: null });
 
 async function loadCount(resource) {
   const { data } = await apiClient.get(resource, { params: { limit: 1 } });
   return data.total;
 }
 
-onMounted(async () => {
-  const [employees, projects, remarks] = await Promise.all([
-    loadCount("/employees"),
-    loadCount("/projects"),
-    loadCount("/remarks"),
-  ]);
-  counts.value = { Employees: employees, Projects: projects, Remarks: remarks };
+onMounted(() => {
+  // На доступ к самому Дашборду прав не требуется, но у роли могут не быть
+  // прав на часть карточек (например, у Наблюдателя нет PROJECTS/REMARKS) —
+  // такие карточки просто пропускаем, а не валим всю страницу одним 403.
+  cards
+    .filter((card) => auth.can(card.module, "VIEW"))
+    .forEach((card) => {
+      loadCount(card.resource)
+        .then((total) => {
+          counts.value[card.key] = total;
+        })
+        .catch(() => {
+          counts.value[card.key] = null;
+        });
+    });
 });
 </script>
 
@@ -23,17 +40,9 @@ onMounted(async () => {
   <div>
     <h2>Главная</h2>
     <div class="cards">
-      <div class="stat-card">
-        <div class="stat-value">{{ counts.Employees }}</div>
-        <div class="stat-label">Сотрудники</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ counts.Projects }}</div>
-        <div class="stat-label">Проекты</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ counts.Remarks }}</div>
-        <div class="stat-label">Замечания</div>
+      <div v-for="card in cards.filter((c) => auth.can(c.module, 'VIEW'))" :key="card.key" class="stat-card">
+        <div class="stat-value">{{ counts[card.key] ?? "—" }}</div>
+        <div class="stat-label">{{ card.label }}</div>
       </div>
     </div>
   </div>
