@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models.enums import RoleCode
+from app.models.permission import UserRole
 from app.models.user import Role, User
 
 ROLE_NAMES = {
@@ -41,12 +42,19 @@ def seed() -> None:
                 Login=admin_login,
                 Email=os.environ.get("SEED_ADMIN_EMAIL", "admin@tcms.local"),
                 HashedPassword=hash_password(admin_password),
-                RoleId=roles_by_code[RoleCode.ADMIN].Id,
             )
             db.add(admin)
             db.flush()
             admin.CreatedBy = admin.Id
             admin.ModifiedBy = admin.Id
+            db.add(
+                UserRole(
+                    UserId=admin.Id,
+                    RoleId=roles_by_code[RoleCode.ADMIN].Id,
+                    CreatedBy=admin.Id,
+                    ModifiedBy=admin.Id,
+                )
+            )
             print(
                 f"Создан администратор: логин='{admin_login}', "
                 f"пароль='{admin_password}' — смените после первого входа."
