@@ -35,3 +35,6 @@ backend/storage/
 
 ## Claude Code session-local runtime state (not shared project config)
 .claude/*.lock
+
+## Личные заметки с реальными учётными данными — никогда не коммитить
+Код для админа *.txt

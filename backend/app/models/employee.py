@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, String
+from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,3 +53,4 @@ class Employee(Base, AuditMixin):
     LegalEntityId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("LegalEntities.Id"), nullable=True
     )
+    Salary: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)

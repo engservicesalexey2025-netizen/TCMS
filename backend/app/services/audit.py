@@ -17,6 +17,7 @@ def log_action(
     old_value: str | None = None,
     new_value: str | None = None,
     ip_address: str | None = None,
+    reason: str | None = None,
 ) -> None:
     db.add(
         AuditLog(
@@ -28,5 +29,6 @@ def log_action(
             OldValue=old_value,
             NewValue=new_value,
             IpAddress=ip_address,
+            Reason=reason,
         )
     )

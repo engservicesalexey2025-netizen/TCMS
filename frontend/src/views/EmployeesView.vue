@@ -3,22 +3,60 @@ import { computed, onMounted, ref, watch } from "vue";
 import apiClient from "../api/client";
 import EntityTable from "../components/EntityTable.vue";
 import EmployeeCard from "../components/EmployeeCard.vue";
+import { useAuthStore } from "../stores/auth";
 import { EMPLOYEE_STATUS } from "../constants/employeeStatus";
+
+const auth = useAuthStore();
+const tablePermissions = computed(() => ({
+  create: auth.can("EMPLOYEES", "CREATE"),
+  edit: auth.can("EMPLOYEES", "UPDATE"),
+  delete: auth.can("EMPLOYEES", "DELETE"),
+  import: auth.can("EMPLOYEES", "IMPORT"),
+  export: auth.can("EMPLOYEES", "EXPORT"),
+}));
 
 const positions = ref([]);
 const cities = ref([]);
 const legalEntities = ref([]);
+const stats = ref({});
+
+async function loadStats() {
+  const { data } = await apiClient.get("/employees/stats");
+  stats.value = data;
+}
 
 onMounted(async () => {
   const [positionsRes, citiesRes, legalEntitiesRes] = await Promise.all([
     apiClient.get("/positions", { params: { limit: 500 } }),
     apiClient.get("/cities", { params: { limit: 500 } }),
     apiClient.get("/legal-entities", { params: { limit: 500 } }),
+    loadStats(),
   ]);
   positions.value = positionsRes.data.items;
   cities.value = citiesRes.data.items;
   legalEntities.value = legalEntitiesRes.data.items;
 });
+
+const activeQuickFilter = ref(null);
+
+const quickFilters = computed(() => [
+  { key: null, label: "Все", count: stats.value.Total ?? 0 },
+  { key: "position", label: "Без должности", count: stats.value.position ?? 0 },
+  { key: "email", label: "Без Email", count: stats.value.email ?? 0 },
+  { key: "corporate_phone", label: "Без корп. номера", count: stats.value.corporate_phone ?? 0 },
+  { key: "city", label: "Без города", count: stats.value.city ?? 0 },
+  { key: "legal_entity", label: "Без ТОО", count: stats.value.legal_entity ?? 0 },
+  { key: "salary", label: "Без оклада", count: stats.value.salary ?? 0 },
+]);
+
+const quickFilterParams = computed(() =>
+  activeQuickFilter.value ? { missing_field: activeQuickFilter.value } : {},
+);
+
+function selectQuickFilter(key) {
+  activeQuickFilter.value = key;
+  if (key) viewMode.value = "table";
+}
 
 const positionOptions = computed(() =>
   positions.value.map((p) => ({ label: p.Name, value: p.Id })),
@@ -54,6 +92,7 @@ const columns = computed(() => [
   { field: "CorporateTenure", header: "Корпоративный стаж", format: formatTenure },
   { field: "LegalEntityId", header: "ТОО ES/Invecon", options: legalEntityOptions.value },
   { field: "Status", header: "Статус", type: "badge", map: EMPLOYEE_STATUS },
+  { field: "Salary", header: "Оклад" },
 ]);
 
 const formFields = computed(() => [
@@ -71,6 +110,7 @@ const formFields = computed(() => [
     options: cityOptions.value,
     createEndpoint: "/cities",
     onCreated: (opt) => cities.value.push({ Id: opt.value, Name: opt.label }),
+    onDeleted: (id) => (cities.value = cities.value.filter((c) => c.Id !== id)),
   },
   {
     field: "LegalEntityId",
@@ -79,6 +119,7 @@ const formFields = computed(() => [
     options: legalEntityOptions.value,
     createEndpoint: "/legal-entities",
     onCreated: (opt) => legalEntities.value.push({ Id: opt.value, Name: opt.label }),
+    onDeleted: (id) => (legalEntities.value = legalEntities.value.filter((l) => l.Id !== id)),
   },
   {
     field: "PositionId",
@@ -87,9 +128,11 @@ const formFields = computed(() => [
     options: positionOptions.value,
     createEndpoint: "/positions",
     onCreated: (opt) => positions.value.push({ Id: opt.value, Name: opt.label }),
+    onDeleted: (id) => (positions.value = positions.value.filter((p) => p.Id !== id)),
   },
   { field: "HireDate", label: "Дата приёма", type: "date" },
   { field: "Status", label: "Статус", type: "select", options: statusOptions, default: "ACTIVE" },
+  { field: "Salary", label: "Оклад", type: "number" },
 ]);
 
 const viewMode = ref(localStorage.getItem("employees_view_mode") || "table");
@@ -124,6 +167,17 @@ watch(
 
 <template>
   <div>
+    <div class="quick-filters">
+      <button
+        v-for="qf in quickFilters"
+        :key="qf.key ?? 'all'"
+        :class="['chip', { active: activeQuickFilter === qf.key }]"
+        @click="selectQuickFilter(qf.key)"
+      >
+        {{ qf.label }} ({{ qf.count }})
+      </button>
+    </div>
+
     <div class="view-toggle">
       <button :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Таблица</button>
       <button :class="{ active: viewMode === 'cards' }" @click="viewMode = 'cards'">Карточки</button>
@@ -135,10 +189,14 @@ watch(
       title="Сотрудники"
       :columns="columns"
       :form-fields="formFields"
+      :permissions="tablePermissions"
+      column-permission-module="EMPLOYEES"
+      :extra-params="quickFilterParams"
       import-resource="employees"
       row-link="/employees"
       edit-link="/employees"
       export-resource
+      @changed="loadStats"
     />
 
     <div v-else>
@@ -168,6 +226,30 @@ watch(
 </template>
 
 <style scoped>
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.chip {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #334155;
+  white-space: nowrap;
+}
+.chip:hover {
+  background: #f1f5f9;
+}
+.chip.active {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
 .view-toggle {
   display: flex;
   gap: 0.5rem;

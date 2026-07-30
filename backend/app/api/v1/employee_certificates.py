@@ -5,15 +5,14 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.deps import DbSession, require_permission
 from app.api.v1.crud_router import build_crud_router
-from app.core.config import settings
 from app.models.employee import Employee
 from app.models.employee_certificate import CertificationLevel, EmployeeCertificate
-from app.models.enums import AuditAction, RoleCode
+from app.models.enums import AuditAction
 from app.models.user import User
 from app.schemas.common import Page
 from app.schemas.employee_certificate import (
@@ -22,9 +21,9 @@ from app.schemas.employee_certificate import (
     EmployeeCertificateOut,
     EmployeeCertificateUpdate,
 )
+from app.services import file_storage
 from app.services.audit import log_action
 from app.services.crud_base import AuditedRepository
-from app.services.masking import FULL_PII_ROLES
 
 router = APIRouter(prefix="/employees/{employee_id}/certificates", tags=["employee-certificates"])
 
@@ -38,17 +37,19 @@ certification_levels_router = build_crud_router(
     prefix="/certification-levels",
     tags=["certification-levels"],
     search_fields=["Name"],
-    write_roles=(RoleCode.ADMIN,),
+    module="CERTIFICATION_LEVELS",
 )
 
 MAX_CERTIFICATE_SIZE_BYTES = 10 * 1024 * 1024
 PDF_MAGIC = b"%PDF-"
 CHUNK_SIZE = 1024 * 1024
 
-WriteUser = Annotated[User, Depends(require_roles(*FULL_PII_ROLES))]
-DownloadUser = Annotated[User, Depends(require_roles(*FULL_PII_ROLES))]
-
-STORAGE_ROOT = Path(settings.FILE_STORAGE_PATH).resolve()
+ViewUser = Annotated[User, Depends(require_permission("EMPLOYEE_CERTIFICATES", "VIEW"))]
+WriteUser = Annotated[User, Depends(require_permission("EMPLOYEE_CERTIFICATES", "UPDATE"))]
+# Сегодня скачивание сканов ограничено теми же ролями, что и запись
+# (ADMIN/DEPARTMENT_HEAD/GROUP_HEAD) — сознательно строже общего VIEW,
+# т.к. сканы документов чувствительнее замаскированных полей карточки.
+DownloadUser = Annotated[User, Depends(require_permission("EMPLOYEE_CERTIFICATES", "UPDATE"))]
 
 
 def _get_employee_or_404(db, employee_id: uuid.UUID) -> Employee:
@@ -102,12 +103,7 @@ async def upload_certificate(
 
     safe_name = _safe_filename(file.filename or "certificate.pdf")
     relative_path = f"certificates/{employee_id}/{uuid.uuid4()}_{safe_name}"
-    final_path = (STORAGE_ROOT / relative_path).resolve()
-    if not final_path.is_relative_to(STORAGE_ROOT):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Недопустимое имя файла")
-
-    final_path.parent.mkdir(parents=True, exist_ok=True)
-    final_path.write_bytes(bytes(body))
+    file_storage.save(relative_path, bytes(body))
 
     obj = repo.create(
         db,
@@ -130,7 +126,7 @@ async def upload_certificate(
 def list_certificates(
     employee_id: uuid.UUID,
     db: DbSession,
-    _user: CurrentUser,
+    _user: ViewUser,
     skip: int = 0,
     limit: int = 50,
 ):
@@ -154,10 +150,14 @@ def download_certificate(
     employee_id: uuid.UUID, cert_id: uuid.UUID, db: DbSession, _user: DownloadUser
 ):
     cert = _get_certificate_or_404(db, employee_id, cert_id)
-    full_path = (STORAGE_ROOT / cert.StoredPath).resolve()
-    if not full_path.is_relative_to(STORAGE_ROOT) or not full_path.is_file():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден на диске")
-    return FileResponse(full_path, media_type="application/pdf", filename=cert.FileName)
+    data = file_storage.read(cert.StoredPath)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл не найден в хранилище")
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{cert.FileName}"'},
+    )
 
 
 @router.patch("/{cert_id}", response_model=EmployeeCertificateOut)
@@ -183,7 +183,6 @@ def delete_certificate(
     сама запись после удаления восстановить нельзя.
     """
     cert = _get_certificate_or_404(db, employee_id, cert_id)
-    full_path = (STORAGE_ROOT / cert.StoredPath).resolve()
 
     log_action(
         db,
@@ -198,5 +197,4 @@ def delete_certificate(
     db.delete(cert)
     db.commit()
 
-    if full_path.is_relative_to(STORAGE_ROOT) and full_path.is_file():
-        full_path.unlink(missing_ok=True)
+    file_storage.delete(cert.StoredPath)

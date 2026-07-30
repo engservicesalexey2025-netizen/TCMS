@@ -1,5 +1,4 @@
 from app.api.v1.crud_router import build_crud_router
-from app.models.enums import RoleCode
 from app.models.org import City, LegalEntity, OrgUnit, Position
 from app.schemas.org import (
     CityCreate,
@@ -21,7 +20,7 @@ org_units_router = build_crud_router(
     prefix="/org-units",
     tags=["org-units"],
     search_fields=["Name"],
-    write_roles=(RoleCode.ADMIN,),
+    module="ORG_UNITS",
 )
 
 positions_router = build_crud_router(
@@ -32,7 +31,7 @@ positions_router = build_crud_router(
     prefix="/positions",
     tags=["positions"],
     search_fields=["Name"],
-    write_roles=(RoleCode.ADMIN,),
+    module="POSITIONS",
 )
 
 cities_router = build_crud_router(
@@ -43,7 +42,7 @@ cities_router = build_crud_router(
     prefix="/cities",
     tags=["cities"],
     search_fields=["Name"],
-    write_roles=(RoleCode.ADMIN,),
+    module="CITIES",
 )
 
 legal_entities_router = build_crud_router(
@@ -54,5 +53,5 @@ legal_entities_router = build_crud_router(
     prefix="/legal-entities",
     tags=["legal-entities"],
     search_fields=["Name"],
-    write_roles=(RoleCode.ADMIN,),
+    module="LEGAL_ENTITIES",
 )

@@ -28,6 +28,34 @@ class Settings(BaseSettings):
 
     FILE_STORAGE_PATH: str = "./storage"
 
+    # Пусто = локальный диск (см. app/services/file_storage.py) — поведение
+    # по умолчанию для локальной разработки. На хостинге с эфемерным диском
+    # (например, Render free) задаются все 4 переменные — файлы уходят в
+    # S3-совместимое хранилище (например, Cloudflare R2) и переживают редеплой.
+    S3_ENDPOINT_URL: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_BUCKET_NAME: str = ""
+
+    # Модуль «Управление доступом и безопасностью» (МОДУЛЬ 001)
+    LOGIN_LOCKOUT_THRESHOLD: int = 5
+    LOGIN_LOCKOUT_MINUTES: int = 15
+    PASSWORD_RESET_TOKEN_MINUTES: int = 15
+    PASSWORD_HISTORY_LIMIT: int = 5
+    PASSWORD_MIN_LENGTH: int = 8
+    VIEW_AS_TOKEN_MINUTES: int = 30
+    MFA_ISSUER_NAME: str = "TCMS"
+
+    # Пусто = SMTP не настроен: ссылки восстановления пароля показываются
+    # администратору в интерфейсе вместо отправки письма (см. план модуля
+    # доступа, §1.7 — решение согласовано с заказчиком).
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_TLS: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

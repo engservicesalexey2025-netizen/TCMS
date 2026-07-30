@@ -2,6 +2,18 @@
 import { computed, onMounted, ref } from "vue";
 import apiClient from "../api/client";
 import EntityTable from "../components/EntityTable.vue";
+import { useAuthStore } from "../stores/auth";
+
+const auth = useAuthStore();
+// Импорт/экспорт для замечаний сегодня не подключены на бэкенде — не
+// выставляем эти права независимо от прав роли.
+const tablePermissions = computed(() => ({
+  create: auth.can("REMARKS", "CREATE"),
+  edit: auth.can("REMARKS", "UPDATE"),
+  delete: auth.can("REMARKS", "DELETE"),
+  import: false,
+  export: false,
+}));
 
 const objects = ref([]);
 const contractors = ref([]);
@@ -53,5 +65,6 @@ const formFields = computed(() => [
     title="Замечания"
     :columns="columns"
     :form-fields="formFields"
+    :permissions="tablePermissions"
   />
 </template>

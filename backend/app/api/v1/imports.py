@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
+from app.services.permissions import user_has_permission
 from app.models.enums import ImportRowClassification, ImportRowDecision, ImportSessionStatus
 from app.models.import_session import ImportRow, ImportSession
 from app.schemas.common import Page
@@ -33,8 +34,8 @@ def _require_profile(entity_type: str):
     return profile
 
 
-def _require_write_access(profile, user) -> None:
-    if user.Role.Code not in profile.write_roles:
+def _require_write_access(profile, db, user) -> None:
+    if not user_has_permission(db, user, profile.module, "IMPORT"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для импорта этой сущности")
 
 
@@ -85,7 +86,7 @@ async def upload_session(
     entity_type: str, db: DbSession, user: CurrentUser, file: UploadFile
 ) -> ImportSessionOut:
     profile = _require_profile(entity_type)
-    _require_write_access(profile, user)
+    _require_write_access(profile, db, user)
     file_bytes = await file.read()
     session = parse_and_stage(db, profile, file_bytes, file.filename or "upload.xlsx", user.Id)
     return _to_session_out(session, db)
@@ -148,7 +149,7 @@ def update_row_decision(
 ) -> ImportRowOut:
     session = _get_session_or_404(db, session_id)
     profile = _require_profile(session.EntityType)
-    _require_write_access(profile, user)
+    _require_write_access(profile, db, user)
     row = db.get(ImportRow, row_id)
     if row is None or row.ImportSessionId != session_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Строка не найдена")
@@ -164,7 +165,7 @@ def bulk_update_row_decision(
 ) -> list[ImportRowOut]:
     session = _get_session_or_404(db, session_id)
     profile = _require_profile(session.EntityType)
-    _require_write_access(profile, user)
+    _require_write_access(profile, db, user)
 
     query = select(ImportRow).where(ImportRow.ImportSessionId == session_id)
     if data.row_ids:
@@ -186,7 +187,7 @@ def bulk_update_row_decision(
 def apply(session_id: uuid.UUID, db: DbSession, user: CurrentUser) -> ApplyResult:
     session = _get_session_or_404(db, session_id)
     profile = _require_profile(session.EntityType)
-    _require_write_access(profile, user)
+    _require_write_access(profile, db, user)
     try:
         result = apply_session(db, session, user.Id)
     except ValueError as exc:
@@ -198,7 +199,7 @@ def apply(session_id: uuid.UUID, db: DbSession, user: CurrentUser) -> ApplyResul
 def cancel_session(session_id: uuid.UUID, db: DbSession, user: CurrentUser) -> ImportSessionOut:
     session = _get_session_or_404(db, session_id)
     profile = _require_profile(session.EntityType)
-    _require_write_access(profile, user)
+    _require_write_access(profile, db, user)
 
     if session.Status not in (ImportSessionStatus.UPLOADED, ImportSessionStatus.REVIEW):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Сессию в этом статусе нельзя отменить")

@@ -1,10 +1,11 @@
 <script setup>
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import apiClient from "../api/client";
 
+const router = useRouter();
 const requests = ref([]);
 const roles = ref([]);
-const lastDecision = ref(null);
 
 function roleName(id) {
   return roles.value.find((r) => r.Id === id)?.Name ?? id;
@@ -19,14 +20,8 @@ async function load() {
   roles.value = rolesRes.data;
 }
 
-async function decide(request, approve) {
-  const { data } = await apiClient.post(`/access-requests/${request.Id}/decide`, {
-    Approve: approve,
-  });
-  if (approve) {
-    lastDecision.value = data.Comment;
-  }
-  await load();
+function openReview(request) {
+  router.push({ name: "access-request-review", params: { id: request.Id } });
 }
 
 onMounted(load);
@@ -35,28 +30,28 @@ onMounted(load);
 <template>
   <div>
     <h2>Заявки на доступ</h2>
-    <p v-if="lastDecision" class="notice">{{ lastDecision }}</p>
     <table class="grid">
       <thead>
         <tr>
           <th>ФИО</th>
           <th>Email</th>
+          <th>Организация</th>
           <th>Запрошенная роль</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="r in requests" :key="r.Id">
+        <tr v-for="r in requests" :key="r.Id" class="clickable" @click="openReview(r)">
           <td>{{ r.FullName }}</td>
           <td>{{ r.Email }}</td>
+          <td>{{ r.Organization || "—" }}</td>
           <td>{{ roleName(r.RequestedRoleId) }}</td>
           <td class="actions">
-            <button class="link-btn approve" @click="decide(r, true)">Одобрить</button>
-            <button class="link-btn reject" @click="decide(r, false)">Отклонить</button>
+            <button class="link-btn" @click.stop="openReview(r)">Рассмотреть</button>
           </td>
         </tr>
         <tr v-if="requests.length === 0">
-          <td colspan="4" class="empty">Нет заявок на рассмотрении</td>
+          <td colspan="5" class="empty">Нет заявок на рассмотрении</td>
         </tr>
       </tbody>
     </table>
@@ -64,12 +59,8 @@ onMounted(load);
 </template>
 
 <style scoped>
-.notice {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  color: #065f46;
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
+h2 {
+  margin: 0 0 1rem;
 }
 .grid {
   width: 100%;
@@ -83,19 +74,19 @@ onMounted(load);
   border-bottom: 1px solid #e2e8f0;
   font-size: 0.9rem;
 }
+.grid tr.clickable {
+  cursor: pointer;
+}
+.grid tr.clickable:hover {
+  background: #f8fafc;
+}
 .link-btn {
   border: none;
   background: none;
+  color: #2563eb;
   cursor: pointer;
   padding: 0;
-  margin-right: 0.75rem;
   font-size: 0.85rem;
-}
-.approve {
-  color: #16a34a;
-}
-.reject {
-  color: #dc2626;
 }
 .empty {
   text-align: center;

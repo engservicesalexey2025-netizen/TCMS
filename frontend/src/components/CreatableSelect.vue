@@ -7,13 +7,15 @@ const props = defineProps({
   options: { type: Array, required: true }, // [{ label, value }]
   createEndpoint: { type: String, required: true }, // e.g. "/positions"
   placeholder: { type: String, default: "Выберите или введите..." },
+  disabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["update:modelValue", "created"]);
+const emit = defineEmits(["update:modelValue", "created", "deleted"]);
 
 const query = ref("");
 const open = ref(false);
 const creating = ref(false);
+const deletingId = ref(null);
 const error = ref("");
 
 function syncQueryFromValue() {
@@ -67,6 +69,31 @@ function closeDelayed() {
     open.value = false;
   }, 150);
 }
+
+function handleFocus() {
+  if (!props.disabled) open.value = true;
+}
+
+async function removeOption(opt) {
+  if (deletingId.value) return;
+  if (!window.confirm(`Удалить значение «${opt.label}» из списка? Это действие затронет все места, где оно используется.`)) {
+    return;
+  }
+  deletingId.value = opt.value;
+  error.value = "";
+  try {
+    await apiClient.post(`${props.createEndpoint}/${opt.value}/archive`);
+    emit("deleted", opt.value);
+    if (props.modelValue === opt.value) {
+      emit("update:modelValue", null);
+      query.value = "";
+    }
+  } catch (e) {
+    error.value = e.response?.data?.detail || "Не удалось удалить значение";
+  } finally {
+    deletingId.value = null;
+  }
+}
 </script>
 
 <template>
@@ -75,13 +102,23 @@ function closeDelayed() {
       v-model="query"
       type="text"
       :placeholder="placeholder"
-      @focus="open = true"
-      @input="open = true"
+      :disabled="disabled"
+      @focus="handleFocus"
+      @input="handleFocus"
       @blur="closeDelayed"
     />
-    <ul v-if="open" class="dropdown">
-      <li v-for="opt in filteredOptions" :key="opt.value" @mousedown.prevent="select(opt)">
-        {{ opt.label }}
+    <ul v-if="open && !disabled" class="dropdown">
+      <li v-for="opt in filteredOptions" :key="opt.value" class="option-row" @mousedown.prevent="select(opt)">
+        <span class="option-label">{{ opt.label }}</span>
+        <button
+          type="button"
+          class="delete-option-btn"
+          title="Удалить значение из списка"
+          :disabled="deletingId === opt.value"
+          @mousedown.stop.prevent="removeOption(opt)"
+        >
+          ✗
+        </button>
       </li>
       <li
         v-if="showCreateOption"
@@ -134,6 +171,36 @@ input {
 }
 .dropdown li:hover {
   background: #f1f5f9;
+}
+.option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.delete-option-btn {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+}
+.delete-option-btn:hover {
+  color: #dc2626;
+}
+.delete-option-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .create-option {
   color: #2563eb;

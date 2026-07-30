@@ -1,6 +1,7 @@
 <script setup>
 defineProps({
   modelValue: { type: String, default: "" },
+  disabled: { type: Boolean, default: false },
 });
 const emit = defineEmits(["update:modelValue"]);
 
@@ -33,7 +34,13 @@ function handleInput(event) {
 </script>
 
 <template>
-  <input type="text" :value="modelValue" placeholder="+7 (___)-___-__-__" @input="handleInput" />
+  <input
+    type="text"
+    :value="modelValue"
+    :disabled="disabled"
+    placeholder="+7 (___)-___-__-__"
+    @input="handleInput"
+  />
 </template>
 
 <style scoped>

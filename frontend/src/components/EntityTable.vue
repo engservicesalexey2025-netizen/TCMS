@@ -2,9 +2,10 @@
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import InputText from "primevue/inputtext";
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import apiClient from "../api/client";
+import { useAuthStore } from "../stores/auth";
 import CreatableSelect from "./CreatableSelect.vue";
 import PhoneInput from "./PhoneInput.vue";
 
@@ -13,12 +14,28 @@ const props = defineProps({
   title: { type: String, required: true },
   columns: { type: Array, required: true }, // [{ field, header, type?: 'badge', map? }]
   formFields: { type: Array, required: true }, // [{ field, label, type, options }]
-  canWrite: { type: Boolean, default: true },
+  // {create,edit,delete,import,export} — по умолчанию всё разрешено, чтобы
+  // вызовы без явного prop сохраняли сегодняшнее поведение (обратная
+  // совместимость на время поэтапной миграции экранов на права, §14 ТЗ).
+  permissions: {
+    type: Object,
+    default: () => ({ create: true, edit: true, delete: true, import: true, export: true }),
+  },
+  // Модуль Column-Level Security (напр. "EMPLOYEES") — если задан, колонки
+  // таблицы и поля формы фильтруются через auth.canSeeColumn(module, field);
+  // если не задан — поведение как раньше (ничего не фильтруется).
+  columnPermissionModule: { type: String, default: null },
   importResource: { type: String, default: null }, // entity_type for /imports/:entityType
   rowLink: { type: String, default: null }, // e.g. "/employees" -> row click navigates to `${rowLink}/${row.Id}`
   editLink: { type: String, default: null }, // e.g. "/employees" -> "Изменить" navigates here instead of opening the quick dialog
   exportResource: { type: Boolean, default: false }, // renders "Экспорт в Excel" hitting `${resource}/export`
+  extraParams: { type: Object, default: () => ({}) }, // extra query params merged into the list request, e.g. quick-filter chips
+  rowClass: { type: Function, default: null }, // (row) => className, e.g. deadline-based row highlighting
 });
+
+const auth = useAuthStore();
+
+const emit = defineEmits(["changed"]);
 
 const router = useRouter();
 
@@ -54,6 +71,7 @@ async function load() {
         limit: limit.value,
         search: search.value || undefined,
         include_archived: showArchived.value,
+        ...props.extraParams,
       },
     });
     items.value = data.items;
@@ -62,6 +80,15 @@ async function load() {
     loading.value = false;
   }
 }
+
+watch(
+  () => props.extraParams,
+  () => {
+    skip.value = 0;
+    load();
+  },
+  { deep: true },
+);
 
 let searchDebounceTimer = null;
 function onSearchInput() {
@@ -93,7 +120,7 @@ async function exportToExcel() {
 }
 
 function resetForm() {
-  props.formFields.forEach((f) => {
+  visibleFormFields.value.forEach((f) => {
     form[f.field] = f.default ?? null;
   });
 }
@@ -112,7 +139,7 @@ function openEdit(row) {
   }
   editingId.value = row.Id;
   formError.value = "";
-  props.formFields.forEach((f) => {
+  visibleFormFields.value.forEach((f) => {
     form[f.field] = row[f.field] ?? null;
   });
   dialogVisible.value = true;
@@ -128,6 +155,7 @@ async function save() {
     }
     dialogVisible.value = false;
     await load();
+    emit("changed");
   } catch (e) {
     formError.value = e.response?.data?.detail || "Ошибка сохранения";
   }
@@ -140,13 +168,25 @@ async function toggleArchive(row) {
   }
   await apiClient.post(`${props.resource}/${row.Id}/${action}`);
   await load();
+  emit("changed");
 }
 
 const columnsStorageKey = `entitytable_columns_${props.resource}`;
 const columnPickerOpen = ref(false);
 const hiddenFields = ref(new Set(JSON.parse(localStorage.getItem(columnsStorageKey) || "[]")));
 
-const visibleColumns = computed(() => props.columns.filter((c) => !hiddenFields.value.has(c.field)));
+// Право на столбец (§14 ТЗ) — декларативно по auth.canSeeColumn, а не по
+// тому, есть ли ключ у загруженных строк (иначе пустая страница выглядела
+// бы как "все столбцы скрыты").
+const permittedColumns = computed(() => {
+  if (!props.columnPermissionModule) return props.columns;
+  return props.columns.filter((c) => auth.canSeeColumn(props.columnPermissionModule, c.field));
+});
+const visibleColumns = computed(() => permittedColumns.value.filter((c) => !hiddenFields.value.has(c.field)));
+const visibleFormFields = computed(() => {
+  if (!props.columnPermissionModule) return props.formFields;
+  return props.formFields.filter((f) => auth.canSeeColumn(props.columnPermissionModule, f.field));
+});
 
 function toggleColumn(field) {
   const next = new Set(hiddenFields.value);
@@ -171,7 +211,7 @@ function fieldLabel(row, col) {
 }
 
 function badgeInfo(row, col) {
-  const value = row[col.field];
+  const value = col.badgeKey ? col.badgeKey(row) : row[col.field];
   return col.map?.[value] || { label: value, color: "#94a3b8" };
 }
 
@@ -212,7 +252,7 @@ defineExpose({ load });
           @click="columnPickerOpen = !columnPickerOpen"
         />
         <div v-if="columnPickerOpen" class="column-picker-dropdown">
-          <label v-for="col in columns" :key="col.field" class="column-picker-item">
+          <label v-for="col in permittedColumns" :key="col.field" class="column-picker-item">
             <input
               type="checkbox"
               :checked="!hiddenFields.has(col.field)"
@@ -223,20 +263,20 @@ defineExpose({ load });
         </div>
       </div>
       <Button
-        v-if="canWrite && importResource"
+        v-if="permissions.import && importResource"
         label="Импорт"
         icon="pi pi-upload"
         severity="secondary"
         @click="goToImport"
       />
       <Button
-        v-if="exportResource"
+        v-if="exportResource && permissions.export"
         label="Экспорт в Excel"
         icon="pi pi-file-excel"
         severity="secondary"
         @click="exportToExcel"
       />
-      <Button v-if="canWrite" label="Добавить" icon="pi pi-plus" @click="openCreate" />
+      <Button v-if="permissions.create" label="Добавить" icon="pi pi-plus" @click="openCreate" />
     </div>
 
     <table class="grid">
@@ -250,7 +290,7 @@ defineExpose({ load });
         <tr
           v-for="row in items"
           :key="row.Id"
-          :class="{ inactive: !row.IsActive, clickable: !!rowLink }"
+          :class="[{ inactive: !row.IsActive, clickable: !!rowLink }, rowClass ? rowClass(row) : '']"
           @click="goToRow(row)"
         >
           <td v-for="col in visibleColumns" :key="col.field">
@@ -264,8 +304,8 @@ defineExpose({ load });
             <template v-else>{{ fieldLabel(row, col) }}</template>
           </td>
           <td class="actions">
-            <button v-if="canWrite" class="link-btn" @click.stop="openEdit(row)">Изменить</button>
-            <button v-if="canWrite" class="link-btn" @click.stop="toggleArchive(row)">
+            <button v-if="permissions.edit" class="link-btn" @click.stop="openEdit(row)">Изменить</button>
+            <button v-if="permissions.delete" class="link-btn" @click.stop="toggleArchive(row)">
               {{ row.IsActive ? "В архив" : "Восстановить" }}
             </button>
           </td>
@@ -284,7 +324,7 @@ defineExpose({ load });
 
     <Dialog v-model:visible="dialogVisible" modal :header="editingId ? 'Изменить запись' : 'Новая запись'" :style="{ width: '28rem' }">
       <div class="form">
-        <label v-for="f in formFields" :key="f.field" class="form-field">
+        <label v-for="f in visibleFormFields" :key="f.field" class="form-field">
           {{ f.label }}
           <select v-if="f.type === 'select'" v-model="form[f.field]">
             <option value="" disabled>Выберите...</option>
@@ -296,6 +336,7 @@ defineExpose({ load });
             :options="f.options"
             :create-endpoint="f.createEndpoint"
             @created="(opt) => f.onCreated && f.onCreated(opt)"
+            @deleted="(id) => f.onDeleted && f.onDeleted(id)"
           />
           <input v-else-if="f.type === 'date'" v-model="form[f.field]" type="date" />
           <input v-else-if="f.type === 'number'" v-model.number="form[f.field]" type="number" step="0.01" />
@@ -408,6 +449,18 @@ defineExpose({ load });
 }
 .grid tr.clickable:hover {
   background: #f8fafc;
+}
+.grid tr.row-warning {
+  background: #fef9c3;
+}
+.grid tr.row-warning:hover {
+  background: #fef08a;
+}
+.grid tr.row-danger {
+  background: #fecaca;
+}
+.grid tr.row-danger:hover {
+  background: #fca5a5;
 }
 .status-badge {
   display: inline-block;

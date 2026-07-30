@@ -34,3 +34,6 @@ class AuditLog(Base):
     OldValue: Mapped[str | None] = mapped_column(Text, nullable=True)
     NewValue: Mapped[str | None] = mapped_column(Text, nullable=True)
     IpAddress: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    Reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Обоснование чувствительного изменения (§12 ТЗ)"
+    )

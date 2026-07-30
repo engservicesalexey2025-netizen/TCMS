@@ -10,11 +10,14 @@ from typing import Any, Literal, Type
 
 from pydantic import BaseModel
 
+from app.models.contractor import Contractor
 from app.models.employee import Employee
-from app.models.enums import EmployeeStatus, Gender, RoleCode
+from app.models.enums import EmployeeStatus, Gender, ProjectStatus, RoleCode
 from app.models.org import City, LegalEntity, OrgUnit, Position
+from app.models.project import ControlSystem, Contour, Project, ProjectStage, ProjectType
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate
 from app.schemas.org import PositionCreate
+from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.services.crud_base import AuditedRepository
 
 ColumnKind = Literal["text", "date", "enum", "fk_lookup"]
@@ -41,6 +44,7 @@ class ImportProfile:
     columns: list[ColumnSpec]
     create_schema: Type[BaseModel]
     update_schema: Type[BaseModel]
+    module: str
     write_roles: tuple[RoleCode, ...] = field(default_factory=tuple)
 
 
@@ -55,6 +59,7 @@ IMPORT_PROFILES: dict[str, ImportProfile] = {
         ],
         create_schema=PositionCreate,
         update_schema=PositionCreate,
+        module="POSITIONS",
         write_roles=(RoleCode.ADMIN,),
     ),
     "employees": ImportProfile(
@@ -94,10 +99,58 @@ IMPORT_PROFILES: dict[str, ImportProfile] = {
                     "Уволен": "DISMISSED",
                 },
             ),
+            ColumnSpec("Salary", ["Оклад"]),
         ],
         create_schema=EmployeeCreate,
         update_schema=EmployeeUpdate,
+        module="EMPLOYEES",
         write_roles=(RoleCode.ADMIN, RoleCode.DEPARTMENT_HEAD, RoleCode.GROUP_HEAD),
+    ),
+    "projects": ImportProfile(
+        entity_type="projects",
+        model=Project,
+        repo=AuditedRepository(Project, search_fields=["Name"]),
+        match_fields=["Name"],
+        columns=[
+            ColumnSpec("Name", ["Наименование"], required=True),
+            ColumnSpec("CityId", ["Город"], kind="fk_lookup", fk_model=City),
+            ColumnSpec("Address", ["Адрес"]),
+            ColumnSpec("Description", ["Описание"]),
+            ColumnSpec(
+                "OrgUnitId", ["Управление", "Подразделение", "Оргединица"],
+                kind="fk_lookup", fk_model=OrgUnit,
+            ),
+            ColumnSpec("ProjectTypeId", ["Тип проекта"], kind="fk_lookup", fk_model=ProjectType),
+            ColumnSpec("ProjectStageId", ["Стадия проекта"], kind="fk_lookup", fk_model=ProjectStage),
+            ColumnSpec("ContourId", ["Контур"], kind="fk_lookup", fk_model=Contour),
+            ColumnSpec("ControlSystemId", ["Система контроля"], kind="fk_lookup", fk_model=ControlSystem),
+            ColumnSpec(
+                "Status", ["Статус"], kind="enum", enum_cls=ProjectStatus,
+                enum_map={
+                    "Планируется": "PLANNED",
+                    "Активный": "IN_PROGRESS",
+                    "Завершён": "COMPLETED",
+                    "Приостановлен": "SUSPENDED",
+                },
+            ),
+            ColumnSpec("DeveloperId", ["Застройщик"], kind="fk_lookup", fk_model=Contractor),
+            ColumnSpec("ContractorId", ["Подрядчик"], kind="fk_lookup", fk_model=Contractor),
+            ColumnSpec("GeneralContractorId", ["Ген подрядчик"], kind="fk_lookup", fk_model=Contractor),
+            ColumnSpec("SubcontractorId", ["Суб подрядчик"], kind="fk_lookup", fk_model=Contractor),
+            ColumnSpec("ContractNumber", ["№ договора", "Номер договора"]),
+            ColumnSpec("Area", ["Площадь объекта", "Площадь"]),
+            ColumnSpec("Cost", ["Стоимость договора", "Стоимость"]),
+            ColumnSpec("GisLink", ["2GIS (ссылка)", "2GIS"]),
+            ColumnSpec("GaskTicketNumber", ["Номер талона ГАСК"]),
+            ColumnSpec("GaskNotificationNumber", ["Номер уведомления ГАСК"]),
+            ColumnSpec("GaskTicketDate", ["Дата талона ГАСК"], kind="date"),
+            ColumnSpec("GaskTicketExpiryDate", ["Срок действия талона ГАСК"], kind="date"),
+            ColumnSpec("ActualEndDate", ["Фактическая дата окончания"], kind="date"),
+        ],
+        create_schema=ProjectCreate,
+        update_schema=ProjectUpdate,
+        module="PROJECTS",
+        write_roles=(RoleCode.ADMIN, RoleCode.DEPARTMENT_HEAD),
     ),
 }
 

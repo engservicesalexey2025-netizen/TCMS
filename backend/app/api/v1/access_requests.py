@@ -5,9 +5,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
-from app.api.deps import DbSession, require_roles
+from app.api.deps import DbSession, require_permission
 from app.core.security import hash_password
-from app.models.enums import AccessRequestStatus, AuditAction, RoleCode
+from app.models.enums import AccessRequestStatus, AuditAction
+from app.models.permission import UserRole
 from app.models.user import AccessRequest, User, UserOrgAccess
 from app.schemas.access_request import (
     AccessRequestCreate,
@@ -43,7 +44,7 @@ def submit_access_request(data: AccessRequestCreate, db: DbSession) -> AccessReq
 @router.get("", response_model=Page[AccessRequestOut])
 def list_access_requests(
     db: DbSession,
-    _user: Annotated[User, Depends(require_roles(RoleCode.ADMIN))],
+    _user: Annotated[User, Depends(require_permission("ACCESS_REQUESTS", "VIEW"))],
     status_filter: AccessRequestStatus | None = None,
     skip: int = 0,
     limit: int = 50,
@@ -56,12 +57,24 @@ def list_access_requests(
     return Page(items=list(rows), total=total, skip=skip, limit=limit)
 
 
+@router.get("/{request_id}", response_model=AccessRequestOut)
+def get_access_request(
+    request_id: uuid.UUID,
+    db: DbSession,
+    _user: Annotated[User, Depends(require_permission("ACCESS_REQUESTS", "VIEW"))],
+) -> AccessRequest:
+    req = db.get(AccessRequest, request_id)
+    if req is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+    return req
+
+
 @router.post("/{request_id}/decide", response_model=AccessRequestOut)
 def decide_access_request(
     request_id: uuid.UUID,
     decision: AccessRequestDecision,
     db: DbSession,
-    admin: Annotated[User, Depends(require_roles(RoleCode.ADMIN))],
+    admin: Annotated[User, Depends(require_permission("ACCESS_REQUESTS", "UPDATE"))],
 ) -> AccessRequest:
     req = db.get(AccessRequest, request_id)
     if req is None:
@@ -96,12 +109,30 @@ def decide_access_request(
         Login=login,
         Email=req.Email,
         HashedPassword=hash_password(temp_password),
-        RoleId=req.RequestedRoleId,
+        # После первого входа обязательна смена пароля (§6 ТЗ) — временный
+        # пароль виден администратору один раз и не должен использоваться
+        # долгосрочно.
+        MustChangePassword=True,
         CreatedBy=admin.Id,
         ModifiedBy=admin.Id,
     )
     db.add(new_user)
     db.flush()
+
+    # Роль(-и) назначаются через UserRoles (многие-ко-многим, §13 ТЗ) — админ
+    # может выдать несколько ролей сразу, не ограничиваясь тем, что выбрал
+    # заявитель (RequestedRoleId используется только как значение по
+    # умолчанию, если RoleIds не переданы).
+    role_ids = decision.RoleIds or [req.RequestedRoleId]
+    for role_id in set(role_ids):
+        db.add(
+            UserRole(
+                UserId=new_user.Id,
+                RoleId=role_id,
+                CreatedBy=admin.Id,
+                ModifiedBy=admin.Id,
+            )
+        )
 
     if req.RequestedOrgUnitId is not None:
         db.add(

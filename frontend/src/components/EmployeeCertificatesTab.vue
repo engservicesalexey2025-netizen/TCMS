@@ -1,11 +1,18 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import apiClient from "../api/client";
+import { useAuthStore } from "../stores/auth";
 import CreatableSelect from "./CreatableSelect.vue";
 
 const props = defineProps({
   employeeId: { type: String, required: true },
 });
+
+const auth = useAuthStore();
+// Скачивание сканов сегодня намеренно ограничено так же строго, как запись
+// (см. app/api/v1/employee_certificates.py::DownloadUser) — сканы чувствительнее
+// замаскированных полей карточки.
+const canWrite = computed(() => auth.can("EMPLOYEE_CERTIFICATES", "UPDATE"));
 
 const certificates = ref([]);
 const certificationLevels = ref([]);
@@ -69,6 +76,10 @@ function onLevelCreated(opt) {
   certificationLevels.value.push({ Id: opt.value, Name: opt.label });
 }
 
+function onLevelDeleted(id) {
+  certificationLevels.value = certificationLevels.value.filter((l) => l.Id !== id);
+}
+
 async function download(cert) {
   const response = await apiClient.get(
     `/employees/${props.employeeId}/certificates/${cert.Id}/download`,
@@ -95,7 +106,7 @@ onMounted(load);
 
 <template>
   <div>
-    <div class="upload-form">
+    <div v-if="canWrite" class="upload-form">
       <label class="file-btn">
         {{ pendingFile ? pendingFile.name : "Выбрать PDF" }}
         <input type="file" accept="application/pdf" @change="handleFileChange" hidden />
@@ -108,6 +119,7 @@ onMounted(load);
           create-endpoint="/certification-levels"
           placeholder="Уровень аттестата..."
           @created="onLevelCreated"
+          @deleted="onLevelDeleted"
         />
       </div>
       <input v-model="pendingIssueDate" type="date" class="date-input" title="Дата аттестата" />
@@ -137,6 +149,7 @@ onMounted(load);
               v-model="cert.CertificateNumber"
               type="text"
               class="cell-input"
+              :disabled="!canWrite"
               @blur="updateCert(cert)"
             />
           </td>
@@ -144,8 +157,10 @@ onMounted(load);
             <CreatableSelect
               v-model="cert.CertificationLevelId"
               :options="levelOptions"
+              :disabled="!canWrite"
               create-endpoint="/certification-levels"
               @created="onLevelCreated"
+          @deleted="onLevelDeleted"
               @update:model-value="updateCert(cert)"
             />
           </td>
@@ -154,14 +169,15 @@ onMounted(load);
               v-model="cert.IssueDate"
               type="date"
               class="cell-input"
+              :disabled="!canWrite"
               @change="updateCert(cert)"
             />
           </td>
           <td>{{ formatSize(cert.FileSizeBytes) }}</td>
           <td>{{ new Date(cert.UploadedDate).toLocaleString("ru-RU") }}</td>
           <td class="actions">
-            <button class="link-btn" @click="download(cert)">Скачать</button>
-            <button class="link-btn delete-btn" @click="remove(cert)">Удалить</button>
+            <button v-if="canWrite" class="link-btn" @click="download(cert)">Скачать</button>
+            <button v-if="canWrite" class="link-btn delete-btn" @click="remove(cert)">Удалить</button>
           </td>
         </tr>
         <tr v-if="certificates.length === 0">

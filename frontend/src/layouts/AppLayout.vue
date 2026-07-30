@@ -1,32 +1,50 @@
 <script setup>
 import { computed } from "vue";
-import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
-const router = useRouter();
-
-const isAdmin = computed(() => auth.roleCode === "ADMIN");
 
 const navItems = [
-  { to: "/", label: "Главная", icon: "pi pi-home" },
-  { to: "/employees", label: "Сотрудники", icon: "pi pi-users" },
-  { to: "/projects", label: "Проекты", icon: "pi pi-building" },
-  { to: "/objects", label: "Объекты", icon: "pi pi-map-marker" },
-  { to: "/contractors", label: "Подрядчики", icon: "pi pi-briefcase" },
-  { to: "/assignments", label: "Назначения", icon: "pi pi-id-card" },
-  { to: "/remarks", label: "Замечания", icon: "pi pi-exclamation-triangle" },
-  { to: "/imports", label: "История импортов", icon: "pi pi-upload" },
+  { to: "/", label: "Главная", icon: "pi pi-home", permission: null },
+  { to: "/employees", label: "Сотрудники", icon: "pi pi-users", permission: { module: "EMPLOYEES", action: "VIEW" } },
+  { to: "/projects", label: "Проекты", icon: "pi pi-building", permission: { module: "PROJECTS", action: "VIEW" } },
+  { to: "/kpi", label: "KPI", icon: "pi pi-chart-bar", permission: { module: "KPI", action: "VIEW" } },
+  { to: "/contractors", label: "Подрядчики", icon: "pi pi-briefcase", permission: { module: "CONTRACTORS", action: "VIEW" } },
+  { to: "/assignments", label: "Назначения", icon: "pi pi-id-card", permission: { module: "ASSIGNMENTS", action: "VIEW" } },
+  { to: "/remarks", label: "Замечания", icon: "pi pi-exclamation-triangle", permission: { module: "REMARKS", action: "VIEW" } },
+  { to: "/imports", label: "История импортов", icon: "pi pi-upload", permission: null },
 ];
 
 const adminNavItems = [
-  { to: "/org-units", label: "Оргструктура", icon: "pi pi-sitemap" },
-  { to: "/access-requests", label: "Заявки на доступ", icon: "pi pi-user-plus" },
+  { to: "/org-units", label: "Оргструктура", icon: "pi pi-sitemap", permission: { module: "ORG_UNITS", action: "VIEW" } },
+  { to: "/access-requests", label: "Заявки на доступ", icon: "pi pi-user-plus", permission: { module: "ACCESS_REQUESTS", action: "VIEW" } },
+  { to: "/admin/users", label: "Пользователи", icon: "pi pi-users", permission: { module: "USERS", action: "VIEW" } },
+  { to: "/admin/roles", label: "Роли и права", icon: "pi pi-shield", permission: { module: "ROLES", action: "MANAGE" } },
+  { to: "/admin/security-log", label: "Журнал безопасности", icon: "pi pi-history", permission: { module: "SECURITY_LOG", action: "VIEW" } },
 ];
 
-function logout() {
-  auth.logout();
-  router.push({ name: "login" });
+const visibleNavItems = computed(() =>
+  navItems.filter((item) => !item.permission || auth.can(item.permission.module, item.permission.action)),
+);
+const visibleAdminNavItems = computed(() =>
+  adminNavItems.filter((item) => !item.permission || auth.can(item.permission.module, item.permission.action)),
+);
+const showAdminSection = computed(() => visibleAdminNavItems.value.length > 0);
+
+const roleNames = computed(() => auth.roles.map((r) => r.Name).join(", "));
+
+async function logout() {
+  await auth.logout();
+}
+
+async function exitViewAs() {
+  const original = localStorage.getItem("tcms_token_original");
+  if (!original) return;
+  const { setToken } = await import("../services/tokenStorage");
+  setToken(original, true);
+  localStorage.removeItem("tcms_token_original");
+  auth.token = original;
+  await auth.fetchMe();
 }
 </script>
 
@@ -35,30 +53,24 @@ function logout() {
     <aside class="sidebar">
       <div class="brand">TCMS</div>
       <nav>
-        <router-link
-          v-for="item in navItems"
-          :key="item.to"
-          :to="item.to"
-          class="nav-link"
-        >
+        <router-link v-for="item in visibleNavItems" :key="item.to" :to="item.to" class="nav-link">
           <i :class="item.icon"></i> {{ item.label }}
         </router-link>
-        <template v-if="isAdmin">
+        <template v-if="showAdminSection">
           <div class="nav-section-title">Администрирование</div>
-          <router-link
-            v-for="item in adminNavItems"
-            :key="item.to"
-            :to="item.to"
-            class="nav-link"
-          >
+          <router-link v-for="item in visibleAdminNavItems" :key="item.to" :to="item.to" class="nav-link">
             <i :class="item.icon"></i> {{ item.label }}
           </router-link>
         </template>
       </nav>
     </aside>
     <div class="main">
+      <div v-if="auth.isViewingAs" class="view-as-banner">
+        Вы просматриваете как: {{ auth.user?.Login }} ({{ roleNames }})
+        <button type="button" @click="exitViewAs">Выйти из режима</button>
+      </div>
       <header class="topbar">
-        <span>{{ auth.user?.Login }} · {{ auth.roleCode }}</span>
+        <router-link to="/profile" class="user-link">{{ auth.user?.Login }} · {{ roleNames }}</router-link>
         <button class="logout-btn" @click="logout">Выйти</button>
       </header>
       <main class="content">
@@ -119,6 +131,26 @@ nav {
   flex-direction: column;
   min-width: 0;
 }
+.view-as-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: #f59e0b;
+  color: #1e293b;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+}
+.view-as-banner button {
+  border: none;
+  background: #1e293b;
+  color: #fff;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
 .topbar {
   display: flex;
   justify-content: flex-end;
@@ -126,6 +158,14 @@ nav {
   gap: 1rem;
   padding: 0.75rem 1.5rem;
   border-bottom: 1px solid #e2e8f0;
+}
+.user-link {
+  color: #334155;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.user-link:hover {
+  text-decoration: underline;
 }
 .logout-btn {
   border: none;

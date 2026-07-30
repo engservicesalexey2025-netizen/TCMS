@@ -28,8 +28,13 @@ const historyTotal = ref(0);
 const historySkip = ref(0);
 const historyLimit = ref(20);
 
-const FULL_PII_ROLES = ["ADMIN", "DEPARTMENT_HEAD", "GROUP_HEAD"];
-const canEditPII = computed(() => FULL_PII_ROLES.includes(auth.roleCode));
+// Поле реально скрыто/замаскировано сервером в самих данных (§14 ТЗ) — этот
+// флаг решает только рендер инпута vs read-only текста, а не сами значения.
+// IIN и PersonalPhone проверяются отдельно — Конструктор прав (§16 ТЗ)
+// позволяет админу настроить видимость каждого поля независимо.
+const canSeeIIN = computed(() => auth.canSeeColumn("EMPLOYEES", "IIN"));
+const canSeePersonalPhone = computed(() => auth.canSeeColumn("EMPLOYEES", "PersonalPhone"));
+const canWrite = computed(() => auth.can("EMPLOYEES", "UPDATE"));
 
 const genderOptions = [
   { label: "Мужской", value: "MALE" },
@@ -65,6 +70,7 @@ async function loadEmployee() {
     HireDate: data.HireDate,
     DismissalDate: data.DismissalDate,
     Status: data.Status,
+    Salary: data.Salary,
     Comment: data.Comment,
   });
 }
@@ -138,33 +144,33 @@ onMounted(async () => {
       <div class="form-grid">
         <label class="field">
           ФИО
-          <input v-model="form.FullName" type="text" />
+          <input v-model="form.FullName" type="text" :disabled="!canWrite" />
         </label>
         <label class="field">
           ИИН
-          <input v-if="canEditPII" v-model="form.IIN" type="text" maxlength="12" />
+          <input v-if="canSeeIIN" v-model="form.IIN" type="text" maxlength="12" :disabled="!canWrite" />
           <span v-else class="readonly-value">{{ employee.IIN || "—" }}</span>
         </label>
         <label class="field">
           Email
-          <input v-model="form.Email" type="text" />
+          <input v-model="form.Email" type="text" :disabled="!canWrite" />
         </label>
         <label class="field">
           Корпоративный телефон
-          <PhoneInput v-model="form.CorporatePhone" />
+          <PhoneInput v-model="form.CorporatePhone" :disabled="!canWrite" />
         </label>
         <label class="field">
           Личный телефон
-          <PhoneInput v-if="canEditPII" v-model="form.PersonalPhone" />
+          <PhoneInput v-if="canSeePersonalPhone" v-model="form.PersonalPhone" :disabled="!canWrite" />
           <span v-else class="readonly-value">{{ employee.PersonalPhone || "—" }}</span>
         </label>
         <label class="field">
           Дата рождения
-          <input v-model="form.BirthDate" type="date" />
+          <input v-model="form.BirthDate" type="date" :disabled="!canWrite" />
         </label>
         <label class="field">
           Пол
-          <select v-model="form.Gender">
+          <select v-model="form.Gender" :disabled="!canWrite">
             <option value="" disabled>Выберите...</option>
             <option v-for="o in genderOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -174,8 +180,10 @@ onMounted(async () => {
           <CreatableSelect
             v-model="form.CityId"
             :options="cityOptions"
+            :disabled="!canWrite"
             create-endpoint="/cities"
             @created="(opt) => cities.push({ Id: opt.value, Name: opt.label })"
+            @deleted="(id) => (cities = cities.filter((c) => c.Id !== id))"
           />
         </label>
         <label class="field">
@@ -183,8 +191,10 @@ onMounted(async () => {
           <CreatableSelect
             v-model="form.LegalEntityId"
             :options="legalEntityOptions"
+            :disabled="!canWrite"
             create-endpoint="/legal-entities"
             @created="(opt) => legalEntities.push({ Id: opt.value, Name: opt.label })"
+            @deleted="(id) => (legalEntities = legalEntities.filter((l) => l.Id !== id))"
           />
         </label>
         <label class="field">
@@ -192,27 +202,33 @@ onMounted(async () => {
           <CreatableSelect
             v-model="form.PositionId"
             :options="positionOptions"
+            :disabled="!canWrite"
             create-endpoint="/positions"
             @created="(opt) => positions.push({ Id: opt.value, Name: opt.label })"
+            @deleted="(id) => (positions = positions.filter((p) => p.Id !== id))"
           />
         </label>
         <label class="field">
           Дата приёма
-          <input v-model="form.HireDate" type="date" />
+          <input v-model="form.HireDate" type="date" :disabled="!canWrite" />
         </label>
         <label class="field">
           Дата увольнения
-          <input v-model="form.DismissalDate" type="date" />
+          <input v-model="form.DismissalDate" type="date" :disabled="!canWrite" />
         </label>
         <label class="field">
           Статус
-          <select v-model="form.Status">
+          <select v-model="form.Status" :disabled="!canWrite">
             <option v-for="o in statusOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </label>
+        <label class="field">
+          Оклад
+          <input v-model.number="form.Salary" type="number" step="0.01" :disabled="!canWrite" />
+        </label>
         <label class="field wide">
           Комментарий (основание смены статуса и т.п.)
-          <input v-model="form.Comment" type="text" />
+          <input v-model="form.Comment" type="text" :disabled="!canWrite" />
         </label>
       </div>
 
@@ -222,7 +238,7 @@ onMounted(async () => {
       </p>
 
       <p v-if="saveError" class="error">{{ saveError }}</p>
-      <button class="primary-btn" :disabled="saving" @click="save">
+      <button v-if="canWrite" class="primary-btn" :disabled="saving" @click="save">
         {{ saving ? "Сохранение..." : "Сохранить" }}
       </button>
     </section>

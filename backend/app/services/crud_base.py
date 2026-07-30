@@ -31,6 +31,7 @@ class AuditedRepository(Generic[ModelType]):
         limit: int = 50,
         search: str | None = None,
         include_archived: bool = False,
+        user=None,
     ) -> tuple[list[ModelType], int]:
         query = select(self.model)
         if not include_archived:
@@ -40,12 +41,24 @@ class AuditedRepository(Generic[ModelType]):
             query = query.where(
                 or_(*[getattr(self.model, f).ilike(like) for f in self.search_fields])
             )
+        if user is not None:
+            from app.services.data_scope import apply_data_scope
+
+            query = apply_data_scope(query, self.model, user, db)
         total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
         rows = db.scalars(query.offset(skip).limit(limit)).all()
         return list(rows), total
 
-    def get(self, db: Session, id: uuid.UUID) -> ModelType | None:
-        return db.get(self.model, id)
+    def get(self, db: Session, id: uuid.UUID, user=None) -> ModelType | None:
+        """`user` включает Row-Level Security (§15 ТЗ) для прямого доступа
+        по Id — те же границы, что и у list(), иначе пользователь без
+        доступа к организации/проекту мог бы прочитать запись напрямую."""
+        obj = db.get(self.model, id)
+        if obj is None or user is None:
+            return obj
+        from app.services.data_scope import is_in_scope
+
+        return obj if is_in_scope(db, user, self.model, obj) else None
 
     def create(self, db: Session, data: dict, user_id: uuid.UUID | None) -> ModelType:
         obj = self.model(**data, CreatedBy=user_id, ModifiedBy=user_id)

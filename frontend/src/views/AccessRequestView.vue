@@ -1,33 +1,48 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import apiClient from "../api/client";
 
-const fullName = ref("");
-const email = ref("");
-const roleId = ref("");
-const orgUnitId = ref("");
+const form = reactive({
+  FullName: "",
+  Email: "",
+  Phone: "",
+  Organization: "",
+  Position: "",
+  RequestedRoleId: "",
+  RequestedOrgUnitId: "",
+  RequestedProjectId: "",
+  Comment: "",
+});
 const roles = ref([]);
 const orgUnits = ref([]);
+const projects = ref([]);
 const submitted = ref(false);
 const error = ref("");
 
 onMounted(async () => {
-  const [rolesRes, orgUnitsRes] = await Promise.all([
+  const [rolesRes, orgUnitsRes, projectsRes] = await Promise.all([
     apiClient.get("/public/roles"),
     apiClient.get("/public/org-units"),
+    apiClient.get("/public/projects"),
   ]);
   roles.value = rolesRes.data;
   orgUnits.value = orgUnitsRes.data;
+  projects.value = projectsRes.data;
 });
 
 async function submit() {
   error.value = "";
   try {
     await apiClient.post("/access-requests", {
-      FullName: fullName.value,
-      Email: email.value,
-      RequestedRoleId: roleId.value,
-      RequestedOrgUnitId: orgUnitId.value || null,
+      FullName: form.FullName,
+      Email: form.Email,
+      Phone: form.Phone || null,
+      Organization: form.Organization || null,
+      Position: form.Position || null,
+      RequestedRoleId: form.RequestedRoleId,
+      RequestedOrgUnitId: form.RequestedOrgUnitId || null,
+      RequestedProjectId: form.RequestedProjectId || null,
+      Comment: form.Comment || null,
     });
     submitted.value = true;
   } catch (e) {
@@ -42,25 +57,48 @@ async function submit() {
       <h1>Заявка на доступ к TCMS</h1>
       <label>
         ФИО
-        <input v-model="fullName" type="text" required />
+        <input v-model="form.FullName" type="text" required />
       </label>
       <label>
         Email
-        <input v-model="email" type="email" required />
+        <input v-model="form.Email" type="email" required />
+      </label>
+      <label>
+        Телефон
+        <input v-model="form.Phone" type="text" />
+      </label>
+      <label>
+        Организация
+        <input v-model="form.Organization" type="text" />
+      </label>
+      <label>
+        Должность
+        <input v-model="form.Position" type="text" />
       </label>
       <label>
         Запрашиваемая роль
-        <select v-model="roleId" required>
+        <select v-model="form.RequestedRoleId" required>
           <option value="" disabled>Выберите роль</option>
           <option v-for="r in roles" :key="r.Id" :value="r.Id">{{ r.Name }}</option>
         </select>
       </label>
       <label>
-        Организационная единица
-        <select v-model="orgUnitId">
+        Подразделение
+        <select v-model="form.RequestedOrgUnitId">
           <option value="">— не требуется —</option>
           <option v-for="u in orgUnits" :key="u.Id" :value="u.Id">{{ u.Name }}</option>
         </select>
+      </label>
+      <label>
+        Проект
+        <select v-model="form.RequestedProjectId">
+          <option value="">— не требуется —</option>
+          <option v-for="p in projects" :key="p.Id" :value="p.Id">{{ p.Name }}</option>
+        </select>
+      </label>
+      <label>
+        Причина получения доступа / комментарий
+        <textarea v-model="form.Comment" rows="3"></textarea>
       </label>
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit">Отправить заявку</button>
@@ -81,6 +119,7 @@ async function submit() {
   align-items: center;
   justify-content: center;
   background: #f1f5f9;
+  padding: 2rem 0;
 }
 .card {
   background: #fff;
@@ -100,11 +139,13 @@ label {
   color: #334155;
 }
 input,
-select {
+select,
+textarea {
   padding: 0.55rem 0.7rem;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 1rem;
+  font-family: inherit;
 }
 button {
   margin-top: 0.5rem;

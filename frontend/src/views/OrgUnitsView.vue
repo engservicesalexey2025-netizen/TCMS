@@ -2,6 +2,18 @@
 import { computed, onMounted, ref } from "vue";
 import apiClient from "../api/client";
 import EntityTable from "../components/EntityTable.vue";
+import { useAuthStore } from "../stores/auth";
+
+const auth = useAuthStore();
+// Импорт/экспорт для оргструктуры сегодня не подключены на бэкенде — не
+// выставляем эти права независимо от прав роли.
+const tablePermissions = computed(() => ({
+  create: auth.can("ORG_UNITS", "CREATE"),
+  edit: auth.can("ORG_UNITS", "UPDATE"),
+  delete: auth.can("ORG_UNITS", "DELETE"),
+  import: false,
+  export: false,
+}));
 
 const orgUnits = ref([]);
 
@@ -39,5 +51,6 @@ const formFields = computed(() => [
     title="Организационная структура"
     :columns="columns"
     :form-fields="formFields"
+    :permissions="tablePermissions"
   />
 </template>

@@ -35,6 +35,7 @@ class EmployeeCreate(BaseModel):
     OrgUnitId: uuid.UUID | None = None
     HireDate: date | None = None
     Status: EmployeeStatus = EmployeeStatus.ACTIVE
+    Salary: float | None = None
     Comment: str | None = None
 
     @field_validator("IIN")
@@ -60,6 +61,7 @@ class EmployeeUpdate(BaseModel):
     HireDate: date | None = None
     DismissalDate: date | None = None
     Status: EmployeeStatus | None = None
+    Salary: float | None = None
     Comment: str | None = None
 
     @field_validator("IIN", mode="before")
@@ -82,10 +84,14 @@ class EmployeeUpdate(BaseModel):
 
 class EmployeeOut(AuditFields):
     FullName: str
-    IIN: str | None
+    # IIN/PersonalPhone default to None (не "обязательные, но nullable") — так
+    # ключ можно вообще не передавать при HIDDEN-режиме field_security, и он
+    # не попадёт в ответ API благодаря response_model_exclude_unset (§14 ТЗ:
+    # "не передаётся через API", а не просто null).
+    IIN: str | None = None
     Email: str | None
     CorporatePhone: str | None
-    PersonalPhone: str | None
+    PersonalPhone: str | None = None
     CityId: uuid.UUID | None
     BirthDate: date | None
     Gender: GenderEnum | None
@@ -95,6 +101,7 @@ class EmployeeOut(AuditFields):
     HireDate: date | None
     DismissalDate: date | None
     Status: EmployeeStatus
+    Salary: float | None
     CorporateTenure: TenureOut | None = None
 
 

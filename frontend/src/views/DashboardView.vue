@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import apiClient from "../api/client";
 
-const counts = ref({ Employees: 0, Projects: 0, Objects: 0, Remarks: 0 });
+const counts = ref({ Employees: 0, Projects: 0, Remarks: 0 });
 
 async function loadCount(resource) {
   const { data } = await apiClient.get(resource, { params: { limit: 1 } });
@@ -10,13 +10,12 @@ async function loadCount(resource) {
 }
 
 onMounted(async () => {
-  const [employees, projects, objects, remarks] = await Promise.all([
+  const [employees, projects, remarks] = await Promise.all([
     loadCount("/employees"),
     loadCount("/projects"),
-    loadCount("/objects"),
     loadCount("/remarks"),
   ]);
-  counts.value = { Employees: employees, Projects: projects, Objects: objects, Remarks: remarks };
+  counts.value = { Employees: employees, Projects: projects, Remarks: remarks };
 });
 </script>
 
@@ -31,10 +30,6 @@ onMounted(async () => {
       <div class="stat-card">
         <div class="stat-value">{{ counts.Projects }}</div>
         <div class="stat-label">Проекты</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">{{ counts.Objects }}</div>
-        <div class="stat-label">Объекты</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">{{ counts.Remarks }}</div>
