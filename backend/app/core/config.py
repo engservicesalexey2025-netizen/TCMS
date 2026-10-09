@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    PROJECT_NAME: str = "TCMS"
+    PROJECT_NAME: str = "TSMS"
     API_V1_PREFIX: str = "/api/v1"
 
     DATABASE_URL: str = (
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     PASSWORD_HISTORY_LIMIT: int = 5
     PASSWORD_MIN_LENGTH: int = 8
     VIEW_AS_TOKEN_MINUTES: int = 30
-    MFA_ISSUER_NAME: str = "TCMS"
+    MFA_ISSUER_NAME: str = "TSMS"
 
     # Пусто = SMTP не настроен: ссылки восстановления пароля показываются
     # администратору в интерфейсе вместо отправки письма (см. план модуля

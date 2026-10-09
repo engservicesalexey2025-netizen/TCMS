@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.access_requests import router as access_requests_router
 from app.api.v1.additional_workload import router as workload_norms_router
 from app.api.v1.assignments import assignment_roles_router
+from app.api.v1.assignments import assignments_extra_router
 from app.api.v1.assignments import router as assignments_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.contractors import router as contractors_router
@@ -14,6 +15,7 @@ from app.api.v1.kpi import router as kpi_router
 from app.api.v1.org import (
     cities_router,
     legal_entities_router,
+    org_units_extra_router,
     org_units_router,
     positions_router,
 )
@@ -41,6 +43,7 @@ api_router.include_router(users_router)
 api_router.include_router(security_log_router)
 api_router.include_router(public_router)
 api_router.include_router(access_requests_router)
+api_router.include_router(org_units_extra_router)
 api_router.include_router(org_units_router)
 api_router.include_router(positions_router)
 api_router.include_router(cities_router)
@@ -56,6 +59,7 @@ api_router.include_router(contours_router)
 api_router.include_router(control_systems_router)
 api_router.include_router(objects_router)
 api_router.include_router(contractors_router)
+api_router.include_router(assignments_extra_router)
 api_router.include_router(assignments_router)
 api_router.include_router(assignment_roles_router)
 api_router.include_router(remarks_router)

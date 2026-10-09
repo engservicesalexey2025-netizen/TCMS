@@ -10,11 +10,13 @@ from typing import Any, Literal, Type
 
 from pydantic import BaseModel
 
+from app.models.assignment import Assignment, AssignmentRole
 from app.models.contractor import Contractor
 from app.models.employee import Employee
 from app.models.enums import EmployeeStatus, Gender, ProjectStatus, RoleCode
 from app.models.org import City, LegalEntity, OrgUnit, Position
 from app.models.project import ControlSystem, Contour, Project, ProjectStage, ProjectType
+from app.schemas.assignment import AssignmentCreate, AssignmentUpdate
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate
 from app.schemas.org import PositionCreate
 from app.schemas.project import ProjectCreate, ProjectUpdate
@@ -151,6 +153,32 @@ IMPORT_PROFILES: dict[str, ImportProfile] = {
         update_schema=ProjectUpdate,
         module="PROJECTS",
         write_roles=(RoleCode.ADMIN, RoleCode.DEPARTMENT_HEAD),
+    ),
+    "assignments": ImportProfile(
+        entity_type="assignments",
+        model=Assignment,
+        repo=AuditedRepository(Assignment),
+        match_fields=["EmployeeId", "ProjectId"],
+        columns=[
+            ColumnSpec(
+                "EmployeeId", ["Сотрудник", "ФИО"], required=True,
+                kind="fk_lookup", fk_model=Employee, fk_lookup_field="FullName",
+            ),
+            ColumnSpec(
+                "ProjectId", ["Проект"], required=True, kind="fk_lookup", fk_model=Project,
+            ),
+            ColumnSpec(
+                "RoleOnProjectId", ["Роль на проекте"], kind="fk_lookup", fk_model=AssignmentRole,
+            ),
+            ColumnSpec("Workload", ["Загрузка"]),
+            ColumnSpec("PeriodStart", ["Начало на проекте", "Дата начала"], kind="date"),
+            ColumnSpec("PeriodEnd", ["Окончание на проекте", "Дата окончания"], kind="date"),
+            ColumnSpec("Comment", ["Комментарий"]),
+        ],
+        create_schema=AssignmentCreate,
+        update_schema=AssignmentUpdate,
+        module="ASSIGNMENTS",
+        write_roles=(RoleCode.ADMIN, RoleCode.DEPARTMENT_HEAD, RoleCode.GROUP_HEAD),
     ),
 }
 

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import apiClient from "../api/client";
 import CreatableSelect from "../components/CreatableSelect.vue";
+import DateInput from "../components/DateInput.vue";
 import EmployeeCertificatesTab from "../components/EmployeeCertificatesTab.vue";
 import PhoneInput from "../components/PhoneInput.vue";
 import { useAuthStore } from "../stores/auth";
@@ -166,7 +167,7 @@ onMounted(async () => {
         </label>
         <label class="field">
           Дата рождения
-          <input v-model="form.BirthDate" type="date" :disabled="!canWrite" />
+          <DateInput v-model="form.BirthDate" :disabled="!canWrite" />
         </label>
         <label class="field">
           Пол
@@ -210,11 +211,11 @@ onMounted(async () => {
         </label>
         <label class="field">
           Дата приёма
-          <input v-model="form.HireDate" type="date" :disabled="!canWrite" />
+          <DateInput v-model="form.HireDate" :disabled="!canWrite" />
         </label>
         <label class="field">
           Дата увольнения
-          <input v-model="form.DismissalDate" type="date" :disabled="!canWrite" />
+          <DateInput v-model="form.DismissalDate" :disabled="!canWrite" />
         </label>
         <label class="field">
           Статус

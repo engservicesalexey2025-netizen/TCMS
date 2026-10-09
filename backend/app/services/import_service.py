@@ -21,7 +21,7 @@ from app.models.enums import ImportRowDecision as Decision
 from app.models.enums import ImportSessionStatus as Status
 from app.models.import_session import ImportRow, ImportSession
 from app.services.audit import log_action
-from app.services.import_profiles import ImportProfile
+from app.services.import_profiles import ImportProfile, get_profile
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_ROWS = 20_000
@@ -52,6 +52,68 @@ def _json_safe_dict(d: dict | None) -> dict | None:
     if d is None:
         return None
     return {k: _json_safe(v) for k, v in d.items()}
+
+
+def _rehydrate_raw(profile: ImportProfile, raw: dict) -> dict:
+    """RawData уже прошла через _json_safe_dict при сохранении (дата стала
+    ISO-строкой), поэтому перед повторной нормализацией нередактированных
+    полей их нужно вернуть к date/datetime — иначе _normalize_row попытается
+    распарсить ISO-строку форматом "%d.%m.%Y" из исходного файла и упадёт."""
+    result = dict(raw)
+    for col in profile.columns:
+        value = result.get(col.field)
+        if col.kind == "date" and isinstance(value, str):
+            try:
+                result[col.field] = date.fromisoformat(value.split("T")[0])
+            except ValueError:
+                pass
+    return result
+
+
+def _match_and_classify(
+    db: Session, profile: ImportProfile, normalized: dict
+) -> tuple[Classification, uuid.UUID | None, int | None, dict | None]:
+    """Сверка нормализованной строки с текущими активными записями сущности —
+    общая логика для первичного парсинга файла и повторной проверки строки
+    после ручного исправления в разделе «Ошибки»."""
+    key = tuple(normalized.get(f) for f in profile.match_fields)
+    filters = [getattr(profile.model, f) == v for f, v in zip(profile.match_fields, key)]
+    matches = db.scalars(
+        select(profile.model).where(profile.model.IsActive.is_(True), *filters)
+    ).all()
+    if len(matches) == 0:
+        return Classification.NEW, None, None, None
+    if len(matches) == 1:
+        obj = matches[0]
+        diff = profile.repo.diff_fields(obj, normalized)
+        if diff:
+            diff_fields = {
+                f: {"old": _json_safe(old), "new": _json_safe(new)}
+                for f, (old, new) in diff.items()
+            }
+            return Classification.CONFLICT, obj.Id, obj.Version, diff_fields
+        return Classification.IDENTICAL, obj.Id, obj.Version, None
+    return Classification.AMBIGUOUS, None, None, None
+
+
+def _duplicate_within_session(
+    db: Session, row: ImportRow, profile: ImportProfile, normalized: dict
+) -> bool:
+    key = tuple(_json_safe(normalized.get(f)) for f in profile.match_fields)
+    other_rows = db.scalars(
+        select(ImportRow).where(
+            ImportRow.ImportSessionId == row.ImportSessionId,
+            ImportRow.Id != row.Id,
+            ImportRow.Classification != Classification.ERROR,
+        )
+    ).all()
+    for other in other_rows:
+        if other.NormalizedData is None:
+            continue
+        other_key = tuple(other.NormalizedData.get(f) for f in profile.match_fields)
+        if other_key == key:
+            return True
+    return False
 
 
 def _normalize_header(value) -> str | None:
@@ -226,32 +288,9 @@ def parse_and_stage(
             if key in duplicate_keys:
                 validation_error = "Дублирующийся ключ внутри файла"
             else:
-                filters = [
-                    getattr(profile.model, f) == v for f, v in zip(profile.match_fields, key)
-                ]
-                matches = db.scalars(
-                    select(profile.model).where(profile.model.IsActive.is_(True), *filters)
-                ).all()
-                if len(matches) == 0:
-                    classification = Classification.NEW
-                elif len(matches) == 1:
-                    obj = matches[0]
-                    matched_id = obj.Id
-                    matched_version = obj.Version
-                    diff = profile.repo.diff_fields(obj, normalized)
-                    if diff:
-                        classification = Classification.CONFLICT
-                        diff_fields = {
-                            f: {
-                                "old": _json_safe(old),
-                                "new": _json_safe(new),
-                            }
-                            for f, (old, new) in diff.items()
-                        }
-                    else:
-                        classification = Classification.IDENTICAL
-                else:
-                    classification = Classification.AMBIGUOUS
+                classification, matched_id, matched_version, diff_fields = _match_and_classify(
+                    db, profile, normalized
+                )
 
         db.add(
             ImportRow(
@@ -291,18 +330,139 @@ def _deserialize_normalized(profile: ImportProfile, normalized: dict) -> dict:
     return result
 
 
-def set_row_decision(db: Session, row: ImportRow, decision: Decision) -> ImportRow:
-    if decision == Decision.CONFIRMED and row.Classification not in CONFIRMABLE_CLASSIFICATIONS:
-        raise ValueError("Эту строку нельзя подтвердить (неоднозначно или ошибка)")
-    row.Decision = decision
+def revalidate_row(db: Session, profile: ImportProfile, row: ImportRow, raw_updates: dict) -> ImportRow:
+    """Ручное исправление строки, попавшей в «Ошибки»: правки накатываются
+    поверх сохранённой RawData, строка нормализуется и классифицируется
+    заново — теми же правилами, что и при первичном разборе файла."""
+    raw = _rehydrate_raw(profile, dict(row.RawData or {}))
+    raw.update(raw_updates)
+    normalized, error = _normalize_row(db, profile, raw)
+
+    classification = Classification.ERROR
+    matched_id = matched_version = diff_fields = None
+    validation_error = error
+
+    if not error and normalized is not None:
+        key = tuple(normalized.get(f) for f in profile.match_fields)
+        if any(v is None for v in key):
+            validation_error = "Не заполнены поля сопоставления"
+        elif _duplicate_within_session(db, row, profile, normalized):
+            validation_error = "Дублирующийся ключ внутри файла"
+        else:
+            classification, matched_id, matched_version, diff_fields = _match_and_classify(
+                db, profile, normalized
+            )
+
+    row.RawData = _json_safe_dict(raw)
+    row.NormalizedData = _json_safe_dict(normalized) if normalized is not None else None
+    row.MatchedRecordId = matched_id
+    row.MatchedRecordVersion = matched_version
+    row.Classification = classification if not validation_error else Classification.ERROR
+    row.DiffFields = diff_fields
+    row.ValidationError = validation_error
+    row.Decision = Decision.PENDING
+    row.AppliedAction = None
+    row.AppliedError = None
+    row.AppliedDate = None
     db.commit()
     db.refresh(row)
     return row
 
 
-def apply_session(db: Session, session: ImportSession, user_id: uuid.UUID | None) -> dict:
-    from app.services.import_profiles import get_profile
+def _apply_row(db: Session, profile: ImportProfile, row: ImportRow, user_id: uuid.UUID | None) -> None:
+    """Применяет одну подтверждённую строку к БД — общая логика для массового
+    применения сессии и мгновенного применения при подтверждении строки."""
+    try:
+        if row.Classification == Classification.IDENTICAL:
+            row.AppliedAction = AppliedAction.SKIPPED
+        elif row.Classification == Classification.NEW:
+            data = _deserialize_normalized(profile, row.NormalizedData)
+            profile.repo.create(db, data, user_id)
+            row.AppliedAction = AppliedAction.CREATED
+        elif row.Classification == Classification.CONFLICT:
+            current = profile.repo.get(db, row.MatchedRecordId)
+            if current is None or current.Version != row.MatchedRecordVersion:
+                row.AppliedAction = AppliedAction.FAILED
+                row.AppliedError = (
+                    "Запись изменена другим пользователем с момента сверки — требуется повторное ревью"
+                )
+            else:
+                data = _deserialize_normalized(profile, row.NormalizedData)
+                profile.repo.update(db, row.MatchedRecordId, data, user_id)
+                row.AppliedAction = AppliedAction.UPDATED
+        else:
+            row.AppliedAction = AppliedAction.SKIPPED
+        row.AppliedDate = func.now()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        row.AppliedAction = AppliedAction.FAILED
+        row.AppliedError = str(exc)
+        db.commit()
 
+
+def _finalize_session_status(db: Session, session: ImportSession, user_id: uuid.UUID | None = None) -> None:
+    remaining_pending = db.scalar(
+        select(func.count()).select_from(
+            select(ImportRow.Id)
+            .where(
+                ImportRow.ImportSessionId == session.Id,
+                ImportRow.Decision == Decision.CONFIRMED,
+                ImportRow.AppliedAction.is_(None),
+            )
+            .subquery()
+        )
+    ) or 0
+    any_failed = db.scalar(
+        select(func.count()).select_from(
+            select(ImportRow.Id)
+            .where(
+                ImportRow.ImportSessionId == session.Id,
+                ImportRow.AppliedAction == AppliedAction.FAILED,
+            )
+            .subquery()
+        )
+    ) or 0
+    any_applied = db.scalar(
+        select(func.count()).select_from(
+            select(ImportRow.Id)
+            .where(
+                ImportRow.ImportSessionId == session.Id,
+                ImportRow.AppliedAction.isnot(None),
+            )
+            .subquery()
+        )
+    ) or 0
+
+    if any_applied == 0:
+        session.Status = Status.REVIEW
+    elif any_failed or remaining_pending:
+        session.Status = Status.PARTIALLY_APPLIED
+    else:
+        session.Status = Status.APPLIED
+    if user_id is not None:
+        session.AppliedBy = user_id
+    session.AppliedDate = func.now()
+    db.commit()
+
+
+def set_row_decision(
+    db: Session, session: ImportSession, row: ImportRow, decision: Decision, user_id: uuid.UUID | None
+) -> ImportRow:
+    if decision == Decision.CONFIRMED and row.Classification not in CONFIRMABLE_CLASSIFICATIONS:
+        raise ValueError("Эту строку нельзя подтвердить (неоднозначно или ошибка)")
+    row.Decision = decision
+    db.commit()
+    db.refresh(row)
+    if decision == Decision.CONFIRMED:
+        profile = get_profile(session.EntityType)
+        _apply_row(db, profile, row, user_id)
+        _finalize_session_status(db, session, user_id)
+        db.refresh(row)
+    return row
+
+
+def apply_session(db: Session, session: ImportSession, user_id: uuid.UUID | None) -> dict:
     if session.Status not in (Status.REVIEW, Status.PARTIALLY_APPLIED, Status.APPLIED):
         raise ValueError("Сессия не в статусе, допускающем применение")
 
@@ -323,43 +483,19 @@ def apply_session(db: Session, session: ImportSession, user_id: uuid.UUID | None
 
     created = updated = failed = skipped = 0
     for row in pending_rows:
-        try:
-            if row.Classification == Classification.IDENTICAL:
-                row.AppliedAction = AppliedAction.SKIPPED
-                skipped += 1
-            elif row.Classification == Classification.NEW:
-                data = _deserialize_normalized(profile, row.NormalizedData)
-                profile.repo.create(db, data, user_id)
-                row.AppliedAction = AppliedAction.CREATED
-                created += 1
-            elif row.Classification == Classification.CONFLICT:
-                current = profile.repo.get(db, row.MatchedRecordId)
-                if current is None or current.Version != row.MatchedRecordVersion:
-                    row.AppliedAction = AppliedAction.FAILED
-                    row.AppliedError = (
-                        "Запись изменена другим пользователем с момента сверки — требуется повторное ревью"
-                    )
-                    failed += 1
-                else:
-                    data = _deserialize_normalized(profile, row.NormalizedData)
-                    profile.repo.update(db, row.MatchedRecordId, data, user_id)
-                    row.AppliedAction = AppliedAction.UPDATED
-                    updated += 1
-            else:
-                row.AppliedAction = AppliedAction.SKIPPED
-                skipped += 1
-            row.AppliedDate = func.now()
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            row.AppliedAction = AppliedAction.FAILED
-            row.AppliedError = str(exc)
-            db.commit()
+        _apply_row(db, profile, row, user_id)
+        if row.AppliedAction == AppliedAction.CREATED:
+            created += 1
+        elif row.AppliedAction == AppliedAction.UPDATED:
+            updated += 1
+        elif row.AppliedAction == AppliedAction.FAILED:
             failed += 1
+        else:
+            skipped += 1
 
     remaining_pending = db.scalar(
         select(func.count()).select_from(
-            select(ImportRow)
+            select(ImportRow.Id)
             .where(
                 ImportRow.ImportSessionId == session.Id,
                 ImportRow.Decision == Decision.CONFIRMED,
@@ -369,10 +505,7 @@ def apply_session(db: Session, session: ImportSession, user_id: uuid.UUID | None
         )
     ) or 0
 
-    session.Status = Status.PARTIALLY_APPLIED if (failed or remaining_pending) else Status.APPLIED
-    session.AppliedBy = user_id
-    session.AppliedDate = func.now()
-    db.commit()
+    _finalize_session_status(db, session, user_id)
 
     log_action(
         db,

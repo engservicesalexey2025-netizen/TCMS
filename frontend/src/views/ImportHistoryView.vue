@@ -1,11 +1,21 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import apiClient from "../api/client";
+import { useAuthStore } from "../stores/auth";
 
+const auth = useAuthStore();
 const sessions = ref([]);
 const total = ref(0);
 const skip = ref(0);
 const limit = ref(20);
+const cleaning = ref(false);
+const canCleanup = computed(() => auth.can("ROLES", "MANAGE"));
+
+// Право на удаление конкретной сессии совпадает с правом на импорт этой
+// сущности (тот же профиль, что бэкенд проверяет в _require_write_access).
+function canDelete(entityType) {
+  return auth.can(entityType.toUpperCase(), "IMPORT");
+}
 
 const STATUS_LABELS = {
   UPLOADED: "Загружен",
@@ -26,12 +36,38 @@ async function load() {
   total.value = data.total;
 }
 
+async function deleteSession(session) {
+  if (!window.confirm(`Удалить запись импорта «${session.FileName}» из истории?`)) return;
+  await apiClient.delete(`/imports/sessions/${session.Id}`);
+  await load();
+}
+
+async function cleanupOld() {
+  if (!window.confirm("Удалить все записи истории импортов старше 60 дней?")) return;
+  cleaning.value = true;
+  try {
+    const { data } = await apiClient.post("/imports/sessions/cleanup", null, {
+      params: { older_than_days: 60 },
+    });
+    window.alert(`Удалено записей: ${data.deleted}`);
+    skip.value = 0;
+    await load();
+  } finally {
+    cleaning.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
 <template>
   <div>
-    <h2>История импортов</h2>
+    <div class="header">
+      <h2>История импортов</h2>
+      <button v-if="canCleanup" class="secondary-btn" :disabled="cleaning" @click="cleanupOld">
+        {{ cleaning ? "Очистка..." : "Очистить старше 60 дней" }}
+      </button>
+    </div>
     <table class="grid">
       <thead>
         <tr>
@@ -43,6 +79,7 @@ onMounted(load);
           <th>Новое</th>
           <th>Расхождение</th>
           <th>Ошибки</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -55,9 +92,14 @@ onMounted(load);
           <td>{{ s.Counts?.NEW || 0 }}</td>
           <td>{{ s.Counts?.CONFLICT || 0 }}</td>
           <td>{{ s.Counts?.ERROR || 0 }}</td>
+          <td>
+            <button v-if="canDelete(s.EntityType)" class="link-btn danger" @click="deleteSession(s)">
+              Удалить
+            </button>
+          </td>
         </tr>
         <tr v-if="sessions.length === 0">
-          <td colspan="8" class="empty">Импортов ещё не было</td>
+          <td colspan="9" class="empty">Импортов ещё не было</td>
         </tr>
       </tbody>
     </table>
@@ -70,6 +112,35 @@ onMounted(load);
 </template>
 
 <style scoped>
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.header h2 {
+  margin: 0;
+}
+.secondary-btn {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #fff;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.link-btn {
+  border: none;
+  background: none;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+.link-btn.danger {
+  color: #dc2626;
+}
 .grid {
   width: 100%;
   border-collapse: collapse;

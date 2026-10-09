@@ -6,7 +6,9 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import apiClient from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import { isoToDisplayDate } from "../utils/date";
 import CreatableSelect from "./CreatableSelect.vue";
+import DateInput from "./DateInput.vue";
 import PhoneInput from "./PhoneInput.vue";
 
 const props = defineProps({
@@ -199,6 +201,10 @@ function toggleColumn(field) {
   localStorage.setItem(columnsStorageKey, JSON.stringify([...next]));
 }
 
+const dateFields = computed(
+  () => new Set(props.formFields.filter((f) => f.type === "date").map((f) => f.field)),
+);
+
 function fieldLabel(row, col) {
   const value = row[col.field];
   if (col.format) {
@@ -206,6 +212,9 @@ function fieldLabel(row, col) {
   }
   if (col.options) {
     return col.options.find((o) => o.value === value)?.label ?? value;
+  }
+  if (dateFields.value.has(col.field)) {
+    return isoToDisplayDate(value) || value;
   }
   return value;
 }
@@ -338,7 +347,7 @@ defineExpose({ load });
             @created="(opt) => f.onCreated && f.onCreated(opt)"
             @deleted="(id) => f.onDeleted && f.onDeleted(id)"
           />
-          <input v-else-if="f.type === 'date'" v-model="form[f.field]" type="date" />
+          <DateInput v-else-if="f.type === 'date'" v-model="form[f.field]" />
           <input v-else-if="f.type === 'number'" v-model.number="form[f.field]" type="number" step="0.01" />
           <PhoneInput v-else-if="f.type === 'phone'" v-model="form[f.field]" />
           <InputText v-else v-model="form[f.field]" />

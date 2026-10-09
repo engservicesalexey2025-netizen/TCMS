@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import apiClient from "../api/client";
 import CreatableSelect from "../components/CreatableSelect.vue";
+import DateInput from "../components/DateInput.vue";
 import ProjectDocumentsTab from "../components/ProjectDocumentsTab.vue";
 import { PROJECT_STATUS } from "../constants/projectStatus";
 
@@ -350,15 +351,15 @@ onMounted(async () => {
           </label>
           <label class="field">
             Дата талона ГАСК
-            <input v-model="form.GaskTicketDate" type="date" />
+            <DateInput v-model="form.GaskTicketDate" />
           </label>
           <label class="field">
             Срок действия талона ГАСК
-            <input v-model="form.GaskTicketExpiryDate" type="date" />
+            <DateInput v-model="form.GaskTicketExpiryDate" />
           </label>
           <label class="field">
             Фактическая дата окончания
-            <input v-model="form.ActualEndDate" type="date" />
+            <DateInput v-model="form.ActualEndDate" />
           </label>
         </div>
       </fieldset>

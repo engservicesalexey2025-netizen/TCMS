@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import apiClient from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import CreatableSelect from "./CreatableSelect.vue";
+import DateInput from "./DateInput.vue";
 
 const props = defineProps({
   employeeId: { type: String, required: true },
@@ -122,7 +123,7 @@ onMounted(load);
           @deleted="onLevelDeleted"
         />
       </div>
-      <input v-model="pendingIssueDate" type="date" class="date-input" title="Дата аттестата" />
+      <DateInput v-model="pendingIssueDate" class="date-input" title="Дата аттестата" />
       <button class="primary-btn" :disabled="!pendingFile || uploading" @click="upload">
         {{ uploading ? "Загрузка..." : "Загрузить" }}
       </button>
@@ -165,12 +166,11 @@ onMounted(load);
             />
           </td>
           <td>
-            <input
+            <DateInput
               v-model="cert.IssueDate"
-              type="date"
               class="cell-input"
               :disabled="!canWrite"
-              @change="updateCert(cert)"
+              @blur="updateCert(cert)"
             />
           </td>
           <td>{{ formatSize(cert.FileSizeBytes) }}</td>

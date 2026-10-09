@@ -1,15 +1,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import apiClient from "../api/client";
-import AdditionalWorkloadTab from "../components/AdditionalWorkloadTab.vue";
 import { useAuthStore } from "../stores/auth";
 import { OBJECT_CATEGORIES, SUPERVISION_STAGES } from "../constants/kpi";
 
 const auth = useAuthStore();
 const canEditMatrix = computed(() => auth.can("KPI", "UPDATE"));
 const canEditSettings = computed(() => auth.can("KPI_SETTINGS", "UPDATE"));
-
-const pageTab = ref("kpi");
 
 const cells = ref([]);
 const loading = ref(true);
@@ -97,29 +94,12 @@ onMounted(async () => {
   <div class="kpi-view">
     <h2>KPI</h2>
 
-    <div class="page-tabs">
-      <button :class="['page-tab-btn', { active: pageTab === 'kpi' }]" @click="pageTab = 'kpi'">
-        KPI
-      </button>
-      <button
-        :class="['page-tab-btn', { active: pageTab === 'workload' }]"
-        @click="pageTab = 'workload'"
-      >
-        Дополнительные нагрузки
-      </button>
-    </div>
+    <p class="intro">
+      Норма предписаний и инспекций по паре «тип объекта × стадия» (используются в компонентах
+      S1 и S3), а также веса и целевые значения формулы ИТОГ = 0,50 × KPI + 0,35 × IQC + 0,15 × CRI-балл.
+    </p>
 
-    <template v-if="pageTab === 'workload'">
-      <AdditionalWorkloadTab />
-    </template>
-
-    <template v-else>
-      <p class="intro">
-        Норма предписаний и инспекций по паре «тип объекта × стадия» (используются в компонентах
-        S1 и S3), а также веса и целевые значения формулы ИТОГ = 0,50 × KPI + 0,35 × IQC + 0,15 × CRI-балл.
-      </p>
-
-      <template v-if="!loading">
+    <template v-if="!loading">
       <section class="card">
         <h3>Норма предписаний (компонент S1)</h3>
         <div class="table-scroll">
@@ -284,7 +264,6 @@ onMounted(async () => {
           {{ settingsSaving ? "Сохранение..." : "Сохранить" }}
         </button>
       </section>
-      </template>
     </template>
   </div>
 </template>
@@ -292,25 +271,6 @@ onMounted(async () => {
 <style scoped>
 .kpi-view h2 {
   margin: 0 0 0.5rem;
-}
-.page-tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.25rem;
-}
-.page-tab-btn {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  padding: 0.4rem 0.9rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: #334155;
-}
-.page-tab-btn.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
 }
 .intro {
   color: #64748b;

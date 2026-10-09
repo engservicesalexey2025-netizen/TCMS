@@ -51,8 +51,8 @@ async function submitMfa() {
 <template>
   <div class="login-page">
     <form v-if="step === 'credentials'" class="login-card" @submit.prevent="submit">
-      <h1>TCMS</h1>
-      <p class="subtitle">Технический надзор за строительством</p>
+      <h1>TSMS</h1>
+      <p class="subtitle">Система управления техническим надзором</p>
       <label>
         Логин
         <input v-model="login" type="text" required autofocus />

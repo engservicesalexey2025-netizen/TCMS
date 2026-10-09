@@ -22,12 +22,23 @@ const applyResult = ref(null);
 const applyError = ref("");
 const failedRows = ref([]);
 
+const editingRowId = ref(null);
+const editForm = ref({});
+const editError = ref("");
+const editSaving = ref(false);
+
 const CLASSIFICATION_LABELS = {
   NEW: "Новое",
   IDENTICAL: "Совпало",
   CONFLICT: "Расхождение",
   AMBIGUOUS: "Неоднозначно",
   ERROR: "Ошибка",
+};
+const APPLIED_ACTION_LABELS = {
+  CREATED: "Создано",
+  UPDATED: "Обновлено",
+  SKIPPED: "Пропущено",
+  FAILED: "Ошибка применения",
 };
 const TABS = ["ALL", "NEW", "CONFLICT", "IDENTICAL", "AMBIGUOUS", "ERROR"];
 const CONFIRMABLE = new Set(["NEW", "IDENTICAL", "CONFLICT"]);
@@ -109,6 +120,48 @@ function toggleExpand(row) {
   expandedRowId.value = expandedRowId.value === row.Id ? null : row.Id;
 }
 
+function rawDisplayValue(row, col) {
+  const value = row.RawData[col.field];
+  if (col.kind === "date" && typeof value === "string" && value.includes("T")) {
+    const [y, m, d] = value.split("T")[0].split("-");
+    return `${d}.${m}.${y}`;
+  }
+  return value ?? "";
+}
+
+function startEdit(row) {
+  editingRowId.value = row.Id;
+  editError.value = "";
+  editForm.value = Object.fromEntries(
+    session.value.Columns.map((col) => [col.field, rawDisplayValue(row, col)]),
+  );
+}
+
+function cancelEdit() {
+  editingRowId.value = null;
+  editError.value = "";
+}
+
+async function saveEdit(row) {
+  editSaving.value = true;
+  editError.value = "";
+  try {
+    const { data } = await apiClient.patch(`/imports/sessions/${session.value.Id}/rows/${row.Id}`, {
+      data: editForm.value,
+    });
+    await refreshSessionAndRows();
+    if (data.Classification === "ERROR") {
+      editError.value = data.ValidationError || "Данные всё ещё некорректны";
+    } else {
+      editingRowId.value = null;
+    }
+  } catch (e) {
+    editError.value = e.response?.data?.detail || "Ошибка проверки данных";
+  } finally {
+    editSaving.value = false;
+  }
+}
+
 async function applyImport() {
   applying.value = true;
   applyError.value = "";
@@ -181,6 +234,7 @@ async function applyImport() {
             <th v-for="col in session.Columns" :key="col.field">{{ col.header }}</th>
             <th>Классификация</th>
             <th>Решение</th>
+            <th>Статус в БД</th>
             <th></th>
           </tr>
         </thead>
@@ -188,9 +242,13 @@ async function applyImport() {
           <template v-for="row in rows" :key="row.Id">
             <tr :class="`row-${row.Classification.toLowerCase()}`">
               <td>{{ row.RowNumber }}</td>
-              <td v-for="col in session.Columns" :key="col.field">{{ row.RawData[col.field] }}</td>
+              <td v-for="col in session.Columns" :key="col.field">{{ rawDisplayValue(row, col) }}</td>
               <td>{{ CLASSIFICATION_LABELS[row.Classification] }}</td>
               <td>{{ row.Decision }}</td>
+              <td>
+                <span v-if="row.AppliedAction">{{ APPLIED_ACTION_LABELS[row.AppliedAction] }}</span>
+                <span v-else>—</span>
+              </td>
               <td class="actions">
                 <button class="link-btn" @click="toggleExpand(row)">Детали</button>
                 <button
@@ -200,11 +258,18 @@ async function applyImport() {
                 >
                   Подтвердить
                 </button>
+                <button
+                  v-if="row.Classification === 'ERROR'"
+                  class="link-btn"
+                  @click="editingRowId === row.Id ? cancelEdit() : startEdit(row)"
+                >
+                  {{ editingRowId === row.Id ? "Отмена" : "Исправить" }}
+                </button>
                 <button class="link-btn" @click="decideRow(row, 'REJECTED')">Отклонить</button>
               </td>
             </tr>
             <tr v-if="expandedRowId === row.Id" class="detail-row">
-              <td :colspan="session.Columns.length + 4">
+              <td :colspan="session.Columns.length + 5">
                 <div v-if="row.ValidationError" class="detail-error">
                   Ошибка: {{ row.ValidationError }}
                 </div>
@@ -224,6 +289,35 @@ async function applyImport() {
                   </tbody>
                 </table>
                 <div v-else>Новая запись, будет создана как есть.</div>
+                <div v-if="row.AppliedError" class="detail-error">
+                  Ошибка применения: {{ row.AppliedError }}
+                </div>
+              </td>
+            </tr>
+            <tr v-if="editingRowId === row.Id" class="edit-row">
+              <td :colspan="session.Columns.length + 5">
+                <div class="edit-form">
+                  <label v-for="col in session.Columns" :key="col.field" class="edit-field">
+                    {{ col.header }}
+                    <select v-if="col.options" v-model="editForm[col.field]">
+                      <option :value="editForm[col.field]" disabled hidden>{{ editForm[col.field] || "— выберите —" }}</option>
+                      <option v-for="opt in col.options" :key="opt" :value="opt">{{ opt }}</option>
+                    </select>
+                    <input
+                      v-else
+                      v-model="editForm[col.field]"
+                      type="text"
+                      :placeholder="col.kind === 'date' ? 'ДД.ММ.ГГГГ' : ''"
+                    />
+                  </label>
+                  <div class="edit-actions">
+                    <button class="primary-btn" :disabled="editSaving" @click="saveEdit(row)">
+                      {{ editSaving ? "Проверка..." : "Сохранить" }}
+                    </button>
+                    <button class="secondary-btn" @click="cancelEdit">Отмена</button>
+                  </div>
+                  <p v-if="editError" class="error">{{ editError }}</p>
+                </div>
               </td>
             </tr>
           </template>
@@ -369,6 +463,35 @@ async function applyImport() {
 }
 .detail-row td {
   background: #f8fafc;
+}
+.edit-row td {
+  background: #fffbeb;
+}
+.edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  padding: 0.5rem 0;
+}
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #334155;
+}
+.edit-field input,
+.edit-field select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  min-width: 140px;
+}
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 .detail-error {
   color: #dc2626;

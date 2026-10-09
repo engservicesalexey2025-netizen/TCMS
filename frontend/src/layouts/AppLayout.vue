@@ -8,15 +8,33 @@ const navItems = [
   { to: "/", label: "Главная", icon: "pi pi-home", permission: null },
   { to: "/employees", label: "Сотрудники", icon: "pi pi-users", permission: { module: "EMPLOYEES", action: "VIEW" } },
   { to: "/projects", label: "Проекты", icon: "pi pi-building", permission: { module: "PROJECTS", action: "VIEW" } },
-  { to: "/kpi", label: "KPI", icon: "pi pi-chart-bar", permission: { module: "KPI", action: "VIEW" } },
   { to: "/contractors", label: "Подрядчики", icon: "pi pi-briefcase", permission: { module: "CONTRACTORS", action: "VIEW" } },
   { to: "/assignments", label: "Назначения", icon: "pi pi-id-card", permission: { module: "ASSIGNMENTS", action: "VIEW" } },
   { to: "/remarks", label: "Замечания", icon: "pi pi-exclamation-triangle", permission: { module: "REMARKS", action: "VIEW" } },
   { to: "/imports", label: "История импортов", icon: "pi pi-upload", permission: null },
 ];
 
+// Технический отдел — отдельная группа с особыми условиями редактирования
+// (права по KPI/WORKLOAD_NORMS назначает Администратор через Роли и права).
+const technicalNavItems = [
+  { to: "/kpi", label: "KPI", icon: "pi pi-chart-bar", permission: { module: "KPI", action: "VIEW" } },
+  {
+    to: "/kpi/departments",
+    label: "KPI ТН Подразделения",
+    icon: "pi pi-sitemap",
+    permission: { module: "KPI", action: "VIEW" },
+  },
+  {
+    to: "/workload-additional",
+    label: "Дополнительные нагрузки ТН",
+    icon: "pi pi-file-excel",
+    permission: { module: "WORKLOAD_NORMS", action: "VIEW" },
+  },
+];
+
 const adminNavItems = [
   { to: "/org-units", label: "Оргструктура", icon: "pi pi-sitemap", permission: { module: "ORG_UNITS", action: "VIEW" } },
+  { to: "/admin/reference-data", label: "Справочники", icon: "pi pi-list", permission: { module: "POSITIONS", action: "VIEW" } },
   { to: "/access-requests", label: "Заявки на доступ", icon: "pi pi-user-plus", permission: { module: "ACCESS_REQUESTS", action: "VIEW" } },
   { to: "/admin/users", label: "Пользователи", icon: "pi pi-users", permission: { module: "USERS", action: "VIEW" } },
   { to: "/admin/roles", label: "Роли и права", icon: "pi pi-shield", permission: { module: "ROLES", action: "MANAGE" } },
@@ -26,6 +44,10 @@ const adminNavItems = [
 const visibleNavItems = computed(() =>
   navItems.filter((item) => !item.permission || auth.can(item.permission.module, item.permission.action)),
 );
+const visibleTechnicalNavItems = computed(() =>
+  technicalNavItems.filter((item) => !item.permission || auth.can(item.permission.module, item.permission.action)),
+);
+const showTechnicalSection = computed(() => visibleTechnicalNavItems.value.length > 0);
 const visibleAdminNavItems = computed(() =>
   adminNavItems.filter((item) => !item.permission || auth.can(item.permission.module, item.permission.action)),
 );
@@ -51,11 +73,17 @@ async function exitViewAs() {
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">TCMS</div>
+      <div class="brand">TSMS</div>
       <nav>
         <router-link v-for="item in visibleNavItems" :key="item.to" :to="item.to" class="nav-link">
           <i :class="item.icon"></i> {{ item.label }}
         </router-link>
+        <template v-if="showTechnicalSection">
+          <div class="nav-section-title">Технический отдел</div>
+          <router-link v-for="item in visibleTechnicalNavItems" :key="item.to" :to="item.to" class="nav-link">
+            <i :class="item.icon"></i> {{ item.label }}
+          </router-link>
+        </template>
         <template v-if="showAdminSection">
           <div class="nav-section-title">Администрирование</div>
           <router-link v-for="item in visibleAdminNavItems" :key="item.to" :to="item.to" class="nav-link">

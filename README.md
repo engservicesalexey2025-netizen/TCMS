@@ -1,4 +1,4 @@
-# TCMS — Technical Control Management System
+# TSMS — Technical Supervision Management System
 
 Веб-система технического надзора за строительством. Концепция и стандарт
 проектирования — см. `1 TCMS Анализ файлов системы.pdf` (Том 1, идеология) и

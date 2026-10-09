@@ -6,15 +6,12 @@ import { useAuthStore } from "../stores/auth";
 import { ASSIGNMENT_STATUS } from "../constants/assignmentStatus";
 
 const auth = useAuthStore();
-// Импорт/экспорт для назначений сегодня не подключены на бэкенде (нет
-// профиля импорта и /assignments/export) — не выставляем эти права
-// независимо от прав роли, чтобы кнопка не вела в никуда.
 const tablePermissions = computed(() => ({
   create: auth.can("ASSIGNMENTS", "CREATE"),
   edit: auth.can("ASSIGNMENTS", "UPDATE"),
   delete: auth.can("ASSIGNMENTS", "DELETE"),
-  import: false,
-  export: false,
+  import: auth.can("ASSIGNMENTS", "IMPORT"),
+  export: auth.can("ASSIGNMENTS", "EXPORT"),
 }));
 
 const employees = ref([]);
@@ -83,5 +80,7 @@ const formFields = computed(() => [
     :columns="columns"
     :form-fields="formFields"
     :permissions="tablePermissions"
+    import-resource="assignments"
+    export-resource
   />
 </template>

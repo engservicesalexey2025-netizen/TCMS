@@ -25,7 +25,7 @@ class ImportSessionOut(BaseModel):
     AppliedDate: datetime | None
     ErrorMessage: str | None
     Counts: dict[str, int] = {}
-    Columns: list[dict[str, str]] = []
+    Columns: list[dict[str, Any]] = []
 
 
 class ImportRowOut(BaseModel):
@@ -46,6 +46,10 @@ class ImportRowOut(BaseModel):
 
 class RowDecisionUpdate(BaseModel):
     decision: ImportRowDecision
+
+
+class RowDataUpdate(BaseModel):
+    data: dict[str, Any]
 
 
 class BulkRowDecisionUpdate(BaseModel):

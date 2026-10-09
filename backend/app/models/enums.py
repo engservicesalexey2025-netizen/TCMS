@@ -2,9 +2,10 @@ import enum
 
 
 class OrgUnitType(str, enum.Enum):
-    DIVISION = "DIVISION"  # Дивизион
-    DEPARTMENT = "DEPARTMENT"  # Управление
-    GROUP = "GROUP"  # Группа
+    DIVISION = "DIVISION"  # Дивизион — верхний уровень
+    CITY = "CITY"  # Город (филиал) — во главе Директор филиала
+    DEPARTMENT = "DEPARTMENT"  # Управление — во главе Руководитель управления
+    GROUP = "GROUP"  # Группа — во главе Руководитель группы
 
 
 class RoleCode(str, enum.Enum):

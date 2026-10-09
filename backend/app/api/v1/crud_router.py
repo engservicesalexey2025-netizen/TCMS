@@ -1,8 +1,9 @@
 import uuid
-from typing import Annotated, Type
+from typing import Annotated, Callable, Type
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, require_permission
 from app.models.user import User
@@ -21,6 +22,8 @@ def build_crud_router(
     module: str,
     search_fields: list[str] | None = None,
     scoped: bool = False,
+    validate_create: Callable[[Session, dict], None] | None = None,
+    validate_update: Callable[[Session, object, dict], None] | None = None,
 ) -> APIRouter:
     """Собирает стандартный REST-эндпойнт (список/карточка/создание/
     правка/архив/восстановление) для одной сущности через универсальный
@@ -31,6 +34,13 @@ def build_crud_router(
     гейтится каждое действие (VIEW/CREATE/UPDATE/DELETE). `scoped=True`
     включает Row-Level Security (§15 ТЗ) там, где модель описана в
     data_scope.SCOPE_RULES.
+
+    `validate_create`/`validate_update` — опциональные хуки для бизнес-правил,
+    которые не выразить общей CRUD-схемой (например, допустимая вложенность
+    типов в самоссылающемся дереве OrgUnit) — бросают HTTPException при
+    нарушении. `validate_update` получает уже загруженный текущий объект
+    (до применения изменений), чтобы можно было проверить эффективное
+    состояние с учётом полей, не пришедших в PATCH.
     """
 
     repo: AuditedRepository = AuditedRepository(model, search_fields=search_fields)
@@ -69,7 +79,10 @@ def build_crud_router(
 
     @router.post("", response_model=out_schema, status_code=status.HTTP_201_CREATED)
     def create_item(data: create_schema, db: DbSession, user: CreateUser):
-        return repo.create(db, data.model_dump(), user.Id)
+        payload = data.model_dump()
+        if validate_create:
+            validate_create(db, payload)
+        return repo.create(db, payload, user.Id)
 
     @router.patch("/{item_id}", response_model=out_schema)
     def update_item(
@@ -78,7 +91,10 @@ def build_crud_router(
         obj = repo.get(db, item_id, user=user if scoped else None)
         if obj is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
-        obj = repo.update(db, item_id, data.model_dump(exclude_unset=True), user.Id)
+        payload = data.model_dump(exclude_unset=True)
+        if validate_update:
+            validate_update(db, obj, payload)
+        obj = repo.update(db, item_id, payload, user.Id)
         return obj
 
     @router.post("/{item_id}/archive", response_model=out_schema)

@@ -1,9 +1,12 @@
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, require_superadmin
+from app.models.user import User
 from app.services.permissions import user_has_permission
 from app.models.enums import ImportRowClassification, ImportRowDecision, ImportSessionStatus
 from app.models.import_session import ImportRow, ImportSession
@@ -13,6 +16,7 @@ from app.schemas.import_session import (
     BulkRowDecisionUpdate,
     ImportRowOut,
     ImportSessionOut,
+    RowDataUpdate,
     RowDecisionUpdate,
 )
 from app.services.import_profiles import get_profile
@@ -20,6 +24,7 @@ from app.services.import_service import (
     apply_session,
     generate_template,
     parse_and_stage,
+    revalidate_row,
     session_counts,
     set_row_decision,
 )
@@ -39,13 +44,28 @@ def _require_write_access(profile, db, user) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для импорта этой сущности")
 
 
+def _column_meta(col, db) -> dict:
+    meta = {
+        "field": col.field,
+        "header": col.header_aliases[0],
+        "kind": col.kind,
+        "required": col.required,
+    }
+    if col.kind == "enum" and col.enum_map:
+        meta["options"] = list(col.enum_map.keys())
+    elif col.kind == "fk_lookup" and col.fk_model is not None:
+        names = db.scalars(
+            select(getattr(col.fk_model, col.fk_lookup_field))
+            .where(col.fk_model.IsActive.is_(True))
+            .order_by(getattr(col.fk_model, col.fk_lookup_field))
+        ).all()
+        meta["options"] = list(names)
+    return meta
+
+
 def _to_session_out(session: ImportSession, db) -> ImportSessionOut:
     profile = get_profile(session.EntityType)
-    columns = (
-        [{"field": c.field, "header": c.header_aliases[0]} for c in profile.columns]
-        if profile
-        else []
-    )
+    columns = [_column_meta(c, db) for c in profile.columns] if profile else []
     return ImportSessionOut(
         Id=session.Id,
         EntityType=session.EntityType,
@@ -154,9 +174,30 @@ def update_row_decision(
     if row is None or row.ImportSessionId != session_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Строка не найдена")
     try:
-        return set_row_decision(db, row, data.decision)
+        return set_row_decision(db, session, row, data.decision, user.Id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.patch("/sessions/{session_id}/rows/{row_id}", response_model=ImportRowOut)
+def edit_row(
+    session_id: uuid.UUID,
+    row_id: uuid.UUID,
+    data: RowDataUpdate,
+    db: DbSession,
+    user: CurrentUser,
+) -> ImportRowOut:
+    """Ручное исправление строки в разделе «Ошибки»: правки применяются к
+    исходным данным строки, после чего она заново нормализуется и
+    классифицируется — принять её (см. update_row_decision) можно сразу же,
+    без повторного импорта файла."""
+    session = _get_session_or_404(db, session_id)
+    profile = _require_profile(session.EntityType)
+    _require_write_access(profile, db, user)
+    row = db.get(ImportRow, row_id)
+    if row is None or row.ImportSessionId != session_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Строка не найдена")
+    return revalidate_row(db, profile, row, data.data)
 
 
 @router.post("/sessions/{session_id}/rows/bulk-decision", response_model=list[ImportRowOut])
@@ -177,7 +218,7 @@ def bulk_update_row_decision(
     updated = []
     for row in rows:
         try:
-            updated.append(set_row_decision(db, row, data.decision))
+            updated.append(set_row_decision(db, session, row, data.decision, user.Id))
         except ValueError:
             continue
     return updated
@@ -206,3 +247,42 @@ def cancel_session(session_id: uuid.UUID, db: DbSession, user: CurrentUser) -> I
     session.Status = ImportSessionStatus.CANCELLED
     db.commit()
     return _to_session_out(session, db)
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(session_id: uuid.UUID, db: DbSession, user: CurrentUser) -> None:
+    """История импорта — не бизнес-данные (см. докстринг ImportSession), поэтому
+    здесь настоящее удаление, а не архивирование."""
+    session = _get_session_or_404(db, session_id)
+    profile = _require_profile(session.EntityType)
+    _require_write_access(profile, db, user)
+    db.query(ImportRow).filter(ImportRow.ImportSessionId == session_id).delete()
+    db.delete(session)
+    db.commit()
+
+
+@router.post("/sessions/cleanup")
+def cleanup_sessions(
+    db: DbSession,
+    _user: Annotated[User, Depends(require_superadmin())],
+    older_than_days: int = 60,
+) -> dict:
+    """Массовая очистка истории импортов старше N дней — таблица иначе растёт
+    неограниченно. Затрагивает сессии любой сущности разом, поэтому право —
+    ROLES.MANAGE (то же, что и остальные общесистемные действия), а не
+    IMPORT конкретного модуля."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    old_ids = list(
+        db.scalars(
+            select(ImportSession.Id).where(ImportSession.CreatedDate < cutoff)
+        )
+    )
+    if old_ids:
+        db.query(ImportRow).filter(ImportRow.ImportSessionId.in_(old_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(ImportSession).filter(ImportSession.Id.in_(old_ids)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    return {"deleted": len(old_ids)}

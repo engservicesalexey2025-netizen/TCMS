@@ -22,14 +22,19 @@ class OrgUnit(Base, AuditMixin):
     UnitType: Mapped[OrgUnitType] = mapped_column(
         Enum(OrgUnitType, name="org_unit_type"), nullable=False
     )
+    Code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ParentOrgUnitId: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("OrgUnits.Id"), nullable=True
+    )
+    ManagerEmployeeId: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("Employees.Id"), nullable=True
     )
 
     Parent: Mapped["OrgUnit | None"] = relationship(
         remote_side="OrgUnit.Id", back_populates="Children"
     )
     Children: Mapped[list["OrgUnit"]] = relationship(back_populates="Parent")
+    Manager: Mapped["Employee | None"] = relationship(foreign_keys=[ManagerEmployeeId])
 
 
 class Position(Base, AuditMixin):

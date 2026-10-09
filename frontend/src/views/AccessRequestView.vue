@@ -54,7 +54,7 @@ async function submit() {
 <template>
   <div class="page">
     <form v-if="!submitted" class="card" @submit.prevent="submit">
-      <h1>Заявка на доступ к TCMS</h1>
+      <h1>Заявка на доступ к TSMS</h1>
       <label>
         ФИО
         <input v-model="form.FullName" type="text" required />

@@ -51,6 +51,18 @@ const routes = [
       },
       { path: "kpi", name: "kpi", component: () => import("../views/KpiView.vue"), meta: { permission: { module: "KPI", action: "VIEW" } } },
       {
+        path: "kpi/departments",
+        name: "kpi-departments",
+        component: () => import("../views/KpiDepartmentsView.vue"),
+        meta: { permission: { module: "KPI", action: "VIEW" } },
+      },
+      {
+        path: "workload-additional",
+        name: "workload-additional",
+        component: () => import("../views/AdditionalWorkloadView.vue"),
+        meta: { permission: { module: "WORKLOAD_NORMS", action: "VIEW" } },
+      },
+      {
         path: "contractors",
         name: "contractors",
         component: () => import("../views/ContractorsView.vue"),
@@ -118,6 +130,12 @@ const routes = [
         name: "admin-security-log",
         component: () => import("../views/admin/SecurityLogView.vue"),
         meta: { permission: { module: "SECURITY_LOG", action: "VIEW" } },
+      },
+      {
+        path: "admin/reference-data",
+        name: "admin-reference-data",
+        component: () => import("../views/admin/ReferenceDataView.vue"),
+        meta: { permission: { module: "POSITIONS", action: "VIEW" } },
       },
     ],
   },
